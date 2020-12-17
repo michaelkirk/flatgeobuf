@@ -544,44 +544,81 @@ impl PackedRTree {
         // read full index at once, if < 1MB
         let min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1_048_576);
 
-        // use ordered search queue to make index traversal in sequential order
-        let mut queue = BinaryHeap::new();
-        queue.push(Reverse((0, level_bounds.len() - 1)));
-        let mut results = Vec::new();
+        #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
+        struct NodeRange {
+            nodes: Vec<usize>,
+            level: usize,
+        }
 
+        // TODO: once levels are merged, can we just make this a vec and get rid of the Reverse?
+        let mut queue = BinaryHeap::new();
+        // max level determined by node_size(items per node == 16) and item_count (111M)
+        queue.push(Reverse(NodeRange {
+            nodes: vec![0],
+            level: level_bounds.len() - 1,
+        }));
+        let mut results = Vec::new();
         while queue.len() != 0 {
-            debug!("popping from queue of len: {}", queue.len());
             let next = queue.pop().ok_or(GeozeroError::GeometryIndex)?.0;
-            let node_index = next.0;
-            let level = next.1;
-            let is_leaf_node = node_index >= num_nodes - num_items;
-            // find the end index of the node
-            let end = cmp::min(node_index + node_size as usize, level_bounds[level].1);
-            let length = end - node_index;
-            let node_items =
-                read_http_node_items(client, min_req_size, index_begin, node_index, length).await?;
-            debug!("node_items.len(): {}", node_items.len());
-            // search through child nodes
-            for pos in node_index..end {
-                let node_pos = pos - node_index;
-                let node_item = &node_items[node_pos];
-                if !item.intersects(&node_item) {
-                    continue;
-                }
-                if is_leaf_node {
-                    debug!("pushing SearchResultItem onto results");
-                    results.push(SearchResultItem {
-                        offset: node_item.offset as usize,
-                        index: pos - leaf_nodes_offset,
-                    });
-                } else {
-                    let reverse = Reverse((node_item.offset as usize, level - 1));
-                    debug!(
-                        "pushing Reverse: {:?} onto Queue with head: {:?}",
-                        &reverse,
-                        queue.peek()
-                    );
-                    queue.push(reverse);
+            debug!(
+                "popped node: {:?},  remaining queue len: {}",
+                next,
+                queue.len()
+            );
+            for node_index in next.nodes {
+                let level = next.level;
+                let is_leaf_node = node_index >= num_nodes - num_items;
+                // find the end index of the node
+                let end = cmp::min(node_index + node_size as usize, level_bounds[level].1);
+                let length = end - node_index;
+                let node_items =
+                    read_http_node_items(client, min_req_size, index_begin, node_index, length)
+                        .await?;
+                debug!("node_items.len(): {}", node_items.len());
+                // search through child nodes
+                for pos in node_index..end {
+                    let node_pos = pos - node_index;
+                    let node_item = &node_items[node_pos];
+                    if !item.intersects(&node_item) {
+                        continue;
+                    }
+                    if is_leaf_node {
+                        debug!("pushing SearchResultItem onto results");
+                        results.push(SearchResultItem {
+                            offset: node_item.offset as usize,
+                            index: pos - leaf_nodes_offset,
+                        });
+                    } else {
+                        let next_level = level - 1;
+                        let mut merged = false;
+                        if let Some(mut head) = queue.peek_mut() {
+                            if head.0.level == next_level {
+                                merged = true;
+                                let offset = node_item.offset as usize;
+                                // increasing order is assumed to be consistent with existing impl
+                                // I think this is true by construction, but asserting to be sure
+                                debug_assert!(head.0.nodes.last().unwrap() < &offset);
+                                debug!(
+                                    "merging offset: {} into existing NodeRange: {:?}",
+                                    offset, head
+                                );
+                                head.0.nodes.push(offset);
+                            }
+                        }
+
+                        if !merged {
+                            let node_range = NodeRange {
+                                nodes: vec![node_item.offset as usize],
+                                level: level - 1,
+                            };
+                            debug!(
+                                "pushing new level for NodeRange: {:?} onto Queue with head: {:?}",
+                                &node_range,
+                                queue.peek()
+                            );
+                            queue.push(Reverse(node_range));
+                        }
+                    }
                 }
             }
         }

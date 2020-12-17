@@ -129,20 +129,24 @@ async fn read_http_node_items(
     client: &mut BufferedHttpClient,
     min_req_size: usize,
     base: usize,
-    node_index: usize,
-    length: usize,
+    node_ranges: Vec<(usize, usize)>, // (node_index, length)
 ) -> Result<Vec<NodeItem>> {
-    let begin = base + node_index * size_of::<NodeItem>();
-    let len = length * size_of::<NodeItem>();
-    let bytes = client.get(begin, len, min_req_size).await?;
+    let mut results = vec![];
+    for (node_index, length) in node_ranges {
+        let begin = base + node_index * size_of::<NodeItem>();
+        let len = length * size_of::<NodeItem>();
+        let bytes = client.get(begin, len, min_req_size).await?;
 
-    let mut node_items = Vec::with_capacity(length);
-    let buf = unsafe { std::slice::from_raw_parts_mut(node_items.as_mut_ptr() as *mut u8, len) };
-    buf.clone_from_slice(&bytes);
-    unsafe {
-        node_items.set_len(length);
+        let mut node_items = Vec::with_capacity(length);
+        let buf =
+            unsafe { std::slice::from_raw_parts_mut(node_items.as_mut_ptr() as *mut u8, len) };
+        buf.clone_from_slice(&bytes);
+        unsafe {
+            node_items.set_len(length);
+        }
+        results.extend(node_items);
     }
-    Ok(node_items)
+    Ok(results)
 }
 
 #[derive(Debug)]
@@ -571,9 +575,9 @@ impl PackedRTree {
                 // find the end index of the node
                 let end = cmp::min(node_index + node_size as usize, level_bounds[level].1);
                 let length = end - node_index;
+                let node_ranges = vec![(node_index, length)];
                 let node_items =
-                    read_http_node_items(client, min_req_size, index_begin, node_index, length)
-                        .await?;
+                    read_http_node_items(client, min_req_size, index_begin, node_ranges).await?;
                 debug!("node_items.len(): {}", node_items.len());
                 // search through child nodes
                 for pos in node_index..end {

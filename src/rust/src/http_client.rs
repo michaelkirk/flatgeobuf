@@ -51,7 +51,7 @@ impl BufferedHttpClient {
             bytes_ever_requested: 0,
         }
     }
-    pub async fn get(&mut self, begin: usize, length: usize, min_req_size: usize) -> Result<&[u8]> {
+    pub async fn get(&mut self, begin: usize, length: usize, _min_req_size: usize) -> Result<&[u8]> {
         let tail = self.head + self.buf.len();
         if begin + length > tail || begin < self.head {
             // Remove bytes before new begin

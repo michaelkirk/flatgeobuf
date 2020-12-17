@@ -550,8 +550,8 @@ impl PackedRTree {
 
         #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
         struct NodeRange {
-            nodes: Vec<usize>,
             level: usize,
+            nodes: Vec<usize>,
         }
 
         // TODO: once levels are merged, can we just make this a vec and get rid of the Reverse?
@@ -569,19 +569,25 @@ impl PackedRTree {
                 next,
                 queue.len()
             );
-            for node_index in next.nodes {
-                let is_leaf_node = node_index >= leaf_nodes_offset;
-                // find the end index of the node
+            let node_ranges: Vec<_> = next.nodes.iter().map(|node_index| {
                 let end = cmp::min(node_index + node_size as usize, level_bounds[next.level].1);
                 let length = end - node_index;
-                let node_ranges = vec![(node_index, length)];
-                let node_items =
-                    read_http_node_items(client, min_req_size, index_begin, node_ranges).await?;
-                debug!("node_items.len(): {}", node_items.len());
+                (*node_index, length)
+            }).collect();
+
+            let node_items =
+                read_http_node_items(client, min_req_size, index_begin, node_ranges.clone()).await?;
+            debug!("fetched node_items.len(): {}", node_items.len());
+
+            let mut base = 0;
+            for (node_index, length) in node_ranges {
+                // find the end index of the node
+                let end = node_index + length;
+                let is_leaf_node = node_index >= leaf_nodes_offset;
                 // search through child nodes
                 for pos in node_index..end {
                     let node_pos = pos - node_index;
-                    let node_item = &node_items[node_pos];
+                    let node_item = &node_items[node_pos + base];
                     if !item.intersects(&node_item) {
                         continue;
                     }
@@ -597,13 +603,13 @@ impl PackedRTree {
                             if head.0.level == next.level - 1 {
                                 merged = true;
                                 let offset = node_item.offset as usize;
-                                // increasing order is assumed to be consistent with existing impl
-                                // I think this is true by c    onstruction, but asserting to be sure
-                                debug_assert!(head.0.nodes.last().unwrap() < &offset);
                                 debug!(
                                     "merging offset: {} into existing NodeRange: {:?}",
                                     offset, head
                                 );
+                                // increasing order is assumed to be consistent with existing impl
+                                // I think this is true by construction, but asserting to be sure
+                                debug_assert!(head.0.nodes.last().unwrap() < &offset);
                                 head.0.nodes.push(offset);
                             }
                         }
@@ -622,6 +628,7 @@ impl PackedRTree {
                         }
                     }
                 }
+                base += length;
             }
         }
         Ok(results)

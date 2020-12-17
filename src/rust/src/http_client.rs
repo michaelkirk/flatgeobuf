@@ -38,6 +38,8 @@ pub struct BufferedHttpClient {
     buf: BytesMut,
     /// Lower index of buffer relative to input stream
     head: usize,
+    /// byte count for aggregate usage statistics
+    bytes_ever_requested: usize,
 }
 
 impl BufferedHttpClient {
@@ -46,6 +48,7 @@ impl BufferedHttpClient {
             http_client: HttpClient::new(url),
             buf: BytesMut::new(),
             head: 0,
+            bytes_ever_requested: 0,
         }
     }
     pub async fn get(&mut self, begin: usize, length: usize, min_req_size: usize) -> Result<&[u8]> {
@@ -63,6 +66,7 @@ impl BufferedHttpClient {
             // Read additional bytes
             let range_begin = max(begin, tail);
             let range_length = max(begin + length - range_begin, min_req_size);
+            self.bytes_ever_requested += range_length;
             let bytes = self.http_client.get(range_begin, range_length).await?;
             self.buf.put(bytes);
         }

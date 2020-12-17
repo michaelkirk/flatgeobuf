@@ -539,6 +539,7 @@ impl PackedRTree {
         let level_bounds = PackedRTree::generate_level_bounds(num_items, node_size);
         let leaf_nodes_offset = level_bounds.first().ok_or(GeozeroError::GeometryIndex)?.0;
         let num_nodes = level_bounds.first().ok_or(GeozeroError::GeometryIndex)?.1;
+        debug!("http_stream_search - index_begin: {}, num_items: {}, node_size: {}, level_bounds: {:?}, GPS bounds:[({}, {}), ({},{})]", index_begin, num_items, node_size, &level_bounds, min_x, min_y, max_x, max_y);
 
         // read full index at once, if < 1MB
         let min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1_048_576);
@@ -549,6 +550,7 @@ impl PackedRTree {
         let mut results = Vec::new();
 
         while queue.len() != 0 {
+            debug!("popping from queue of len: {}", queue.len());
             let next = queue.pop().ok_or(GeozeroError::GeometryIndex)?.0;
             let node_index = next.0;
             let level = next.1;
@@ -558,6 +560,7 @@ impl PackedRTree {
             let length = end - node_index;
             let node_items =
                 read_http_node_items(client, min_req_size, index_begin, node_index, length).await?;
+            debug!("node_items.len(): {}", node_items.len());
             // search through child nodes
             for pos in node_index..end {
                 let node_pos = pos - node_index;
@@ -566,12 +569,19 @@ impl PackedRTree {
                     continue;
                 }
                 if is_leaf_node {
+                    debug!("pushing SearchResultItem onto results");
                     results.push(SearchResultItem {
                         offset: node_item.offset as usize,
                         index: pos - leaf_nodes_offset,
                     });
                 } else {
-                    queue.push(Reverse((node_item.offset as usize, level - 1)));
+                    let reverse = Reverse((node_item.offset as usize, level - 1));
+                    debug!(
+                        "pushing Reverse: {:?} onto Queue with head: {:?}",
+                        &reverse,
+                        queue.peek()
+                    );
+                    queue.push(reverse);
                 }
             }
         }

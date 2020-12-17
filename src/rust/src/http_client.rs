@@ -65,7 +65,8 @@ impl BufferedHttpClient {
 
             // Read additional bytes
             let range_begin = max(begin, tail);
-            let range_length = max(begin + length - range_begin, min_req_size);
+            //let range_length = max(begin + length - range_begin, min_req_size);
+            let range_length = begin + length - range_begin;
             self.bytes_ever_requested += range_length;
             debug!(
                 "range: ({} , {}), length: {}, bytes_ever_requested: {}",

@@ -570,10 +570,9 @@ impl PackedRTree {
                 queue.len()
             );
             for node_index in next.nodes {
-                let level = next.level;
-                let is_leaf_node = node_index >= num_nodes - num_items;
+                let is_leaf_node = node_index >= leaf_nodes_offset;
                 // find the end index of the node
-                let end = cmp::min(node_index + node_size as usize, level_bounds[level].1);
+                let end = cmp::min(node_index + node_size as usize, level_bounds[next.level].1);
                 let length = end - node_index;
                 let node_ranges = vec![(node_index, length)];
                 let node_items =
@@ -593,14 +592,13 @@ impl PackedRTree {
                             index: pos - leaf_nodes_offset,
                         });
                     } else {
-                        let next_level = level - 1;
                         let mut merged = false;
                         if let Some(mut head) = queue.peek_mut() {
-                            if head.0.level == next_level {
+                            if head.0.level == next.level - 1 {
                                 merged = true;
                                 let offset = node_item.offset as usize;
                                 // increasing order is assumed to be consistent with existing impl
-                                // I think this is true by construction, but asserting to be sure
+                                // I think this is true by c    onstruction, but asserting to be sure
                                 debug_assert!(head.0.nodes.last().unwrap() < &offset);
                                 debug!(
                                     "merging offset: {} into existing NodeRange: {:?}",
@@ -613,7 +611,7 @@ impl PackedRTree {
                         if !merged {
                             let node_range = NodeRange {
                                 nodes: vec![node_item.offset as usize],
-                                level: level - 1,
+                                level: next.level - 1,
                             };
                             debug!(
                                 "pushing new level for NodeRange: {:?} onto Queue with head: {:?}",

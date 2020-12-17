@@ -129,7 +129,7 @@ async fn read_http_node_items(
     client: &mut BufferedHttpClient,
     min_req_size: usize,
     base: usize,
-    node_ranges: &[(usize, usize)], // (node_index, length)
+    node_ranges: Vec<(usize, usize)>, // (node_index, length)
 ) -> Result<Vec<NodeItem>> {
     let mut results = vec![];
     for (node_index, length) in node_ranges {
@@ -137,12 +137,12 @@ async fn read_http_node_items(
         let len = length * size_of::<NodeItem>();
         let bytes = client.get(begin, len, min_req_size).await?;
 
-        let mut node_items = Vec::with_capacity(*length);
+        let mut node_items = Vec::with_capacity(length);
         let buf =
             unsafe { std::slice::from_raw_parts_mut(node_items.as_mut_ptr() as *mut u8, len) };
         buf.clone_from_slice(&bytes);
         unsafe {
-            node_items.set_len(*length);
+            node_items.set_len(length);
         }
         results.extend(node_items);
     }
@@ -569,26 +569,18 @@ impl PackedRTree {
                 next,
                 queue.len()
             );
-            let node_ranges: Vec<_> = next
-                .nodes
-                .iter()
-                .map(|node_index| {
-                    // find the end index of the node
-                    let end = cmp::min(node_index + node_size as usize, level_bounds[next.level].1);
-                    let length = end - node_index;
-                    // CLEANUP: better to just return end?
-                    (*node_index, length)
-                })
-                .collect();
-
-            let node_items =
-                read_http_node_items(client, min_req_size, index_begin, &node_ranges).await?;
-            debug!("node_items.len(): {}", node_items.len());
-            // search through child nodes
-            for (node_index, len) in &node_ranges {
-                let end = node_index + len;
-                let is_leaf_node = *node_index >= num_nodes - num_items;
-                for pos in *node_index..end {
+            for node_index in next.nodes {
+                let level = next.level;
+                let is_leaf_node = node_index >= num_nodes - num_items;
+                // find the end index of the node
+                let end = cmp::min(node_index + node_size as usize, level_bounds[level].1);
+                let length = end - node_index;
+                let node_ranges = vec![(node_index, length)];
+                let node_items =
+                    read_http_node_items(client, min_req_size, index_begin, node_ranges).await?;
+                debug!("node_items.len(): {}", node_items.len());
+                // search through child nodes
+                for pos in node_index..end {
                     let node_pos = pos - node_index;
                     let node_item = &node_items[node_pos];
                     if !item.intersects(&node_item) {
@@ -601,22 +593,19 @@ impl PackedRTree {
                             index: pos - leaf_nodes_offset,
                         });
                     } else {
-                        let child_level = next.level - 1;
+                        let next_level = level - 1;
                         let mut merged = false;
                         if let Some(mut head) = queue.peek_mut() {
-                            if head.0.level == child_level {
+                            if head.0.level == next_level {
                                 merged = true;
                                 let offset = node_item.offset as usize;
-                                // Consistent with existing implementation, ensure increasing order
-                                // I think this happens by construction, but just asserting to be sure
-                                // head.0.nodes is empty sometimes - Why? I assumed all nodes for a level would be added
-                                // before popping any off.
+                                // increasing order is assumed to be consistent with existing impl
+                                // I think this is true by construction, but asserting to be sure
+                                debug_assert!(head.0.nodes.last().unwrap() < &offset);
                                 debug!(
                                     "merging offset: {} into existing NodeRange: {:?}",
                                     offset, head
                                 );
-                                // sometimes seeing existing node repushed here... why?
-                                debug_assert!(head.0.nodes.last().map(|prev_node| prev_node < &offset).unwrap_or(true));
                                 head.0.nodes.push(offset);
                             }
                         }
@@ -624,7 +613,7 @@ impl PackedRTree {
                         if !merged {
                             let node_range = NodeRange {
                                 nodes: vec![node_item.offset as usize],
-                                level: child_level,
+                                level: level - 1,
                             };
                             debug!(
                                 "pushing new level for NodeRange: {:?} onto Queue with head: {:?}",

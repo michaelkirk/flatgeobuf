@@ -131,22 +131,29 @@ async fn read_http_node_items(
     base: usize,
     node_ranges: Vec<(usize, usize)>, // (node_index, length)
 ) -> Result<Vec<NodeItem>> {
-    let mut results = vec![];
-    for (node_index, length) in node_ranges {
-        let begin = base + node_index * size_of::<NodeItem>();
-        let len = length * size_of::<NodeItem>();
-        let bytes = client.get(begin, len, min_req_size).await?;
+    let mut total_byte_count = 0;
+    let mut total_node_count = 0;
+    let byte_ranges: Vec<_> = node_ranges
+        .iter()
+        .map(|(node_index, node_count)| {
+            let begin = base + node_index * size_of::<NodeItem>();
+            let len = node_count * size_of::<NodeItem>();
+            total_byte_count += len;
+            total_node_count += node_count;
+            (begin, len)
+        })
+        .collect();
+    let bytes = client.get_byte_ranges(byte_ranges, min_req_size).await?;
 
-        let mut node_items = Vec::with_capacity(length);
-        let buf =
-            unsafe { std::slice::from_raw_parts_mut(node_items.as_mut_ptr() as *mut u8, len) };
-        buf.clone_from_slice(&bytes);
-        unsafe {
-            node_items.set_len(length);
-        }
-        results.extend(node_items);
+    let mut node_items = Vec::with_capacity(total_node_count);
+    let buf = unsafe {
+        std::slice::from_raw_parts_mut(node_items.as_mut_ptr() as *mut u8, total_byte_count)
+    };
+    buf.clone_from_slice(&bytes);
+    unsafe {
+        node_items.set_len(total_node_count);
     }
-    Ok(results)
+    Ok(node_items)
 }
 
 #[derive(Debug)]
@@ -569,14 +576,19 @@ impl PackedRTree {
                 next,
                 queue.len()
             );
-            let node_ranges: Vec<_> = next.nodes.iter().map(|node_index| {
-                let end = cmp::min(node_index + node_size as usize, level_bounds[next.level].1);
-                let length = end - node_index;
-                (*node_index, length)
-            }).collect();
+            let node_ranges: Vec<_> = next
+                .nodes
+                .iter()
+                .map(|node_index| {
+                    let end = cmp::min(node_index + node_size as usize, level_bounds[next.level].1);
+                    let length = end - node_index;
+                    (*node_index, length)
+                })
+                .collect();
 
             let node_items =
-                read_http_node_items(client, min_req_size, index_begin, node_ranges.clone()).await?;
+                read_http_node_items(client, min_req_size, index_begin, node_ranges.clone())
+                    .await?;
             debug!("fetched node_items.len(): {}", node_items.len());
 
             let mut base = 0;

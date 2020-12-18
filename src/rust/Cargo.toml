@@ -19,6 +19,7 @@ async-trait = "0.1"
 reqwest = "0.10"
 bytes = "0.5"
 log = "0.4.11"
+mime = "*"
 
 [dev-dependencies]
 geozero-core = "0.5"

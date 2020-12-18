@@ -143,15 +143,19 @@ async fn read_http_node_items(
             (begin, len)
         })
         .collect();
-    let bytes = client.get_byte_ranges(byte_ranges, min_req_size).await?;
 
-    let mut node_items = Vec::with_capacity(total_node_count);
+    let bytes = client.get_byte_ranges(byte_ranges, min_req_size).await?;
+    // client may have returned extra bytes due to min_req_size, resulting in a partial node
+    let items_count = bytes.len() / size_of::<NodeItem>();
+    let node_bytes_len = items_count * size_of::<NodeItem>();
+
+    let mut node_items = Vec::with_capacity(items_count);
     let buf = unsafe {
-        std::slice::from_raw_parts_mut(node_items.as_mut_ptr() as *mut u8, total_byte_count)
+        std::slice::from_raw_parts_mut(node_items.as_mut_ptr() as *mut u8, node_bytes_len)
     };
-    buf.clone_from_slice(&bytes);
+    buf.clone_from_slice(&bytes[0..node_bytes_len]);
     unsafe {
-        node_items.set_len(total_node_count);
+        node_items.set_len(items_count);
     }
     Ok(node_items)
 }
@@ -553,7 +557,7 @@ impl PackedRTree {
         debug!("http_stream_search - index_begin: {}, num_items: {}, node_size: {}, level_bounds: {:?}, GPS bounds:[({}, {}), ({},{})]", index_begin, num_items, node_size, &level_bounds, min_x, min_y, max_x, max_y);
 
         // read full index at once, if < 1MB
-        let min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1_048_576);
+        let min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1024 * 8);
 
         #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
         struct NodeRange {

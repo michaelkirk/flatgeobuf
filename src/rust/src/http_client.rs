@@ -242,16 +242,36 @@ impl BufferedHttpClient {
     pub async fn get_byte_ranges(
         &mut self,
         byte_ranges: Vec<(usize, usize)>,
-        _min_req_size: usize,
+        min_req_size: usize,
     ) -> Result<&[u8]> {
-        self.buf.clear();
+        let byte_ranges = {
+            let first = byte_ranges.first().expect("byte_ranges was empty");
+            let last = byte_ranges.last().expect("byte_ranges was empty");
+            let start = first.0;
+            let end = last.0 + last.1;
+            debug_assert!(start < end);
+
+
+
+            if end - start < min_req_size {
+                debug!("small request using alternative min_req_size: {}", min_req_size);
+                vec![(start, min_req_size)]
+            } else {
+                byte_ranges
+            }
+        };
+
         let ranges_length: usize = byte_ranges.iter().map(|(_start, len)| len).sum();
         self.bytes_ever_requested += ranges_length;
+
         debug!(
             "ranges: {:?}, length: {}, bytes_ever_requested: {}",
             byte_ranges, ranges_length, self.bytes_ever_requested
         );
+
         let bytes = self.http_client.get_ranges(byte_ranges).await?;
+
+        self.buf.clear();
         self.buf.put(bytes);
         self.head = 0;
         // TODO: Any benefit to not just blowing everything away?

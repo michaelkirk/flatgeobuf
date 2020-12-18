@@ -47,7 +47,7 @@ impl HttpClient {
             .await
             .map_err(|e| GeozeroError::HttpError(e.to_string()))?;
 
-        dbg!(&response);
+        //dbg!(&response);
         if !response.status().is_success() {
             return Err(GeozeroError::HttpStatus(response.status().as_u16()));
         }
@@ -68,7 +68,6 @@ impl HttpClient {
         // let parsed_header_value = header_value.parse::<mime::Mime>().expect("failed to parse header value to mime");
         let split_token = "; boundary=";
         let parsed_header_value: Vec<_> = header_value.split_terminator(split_token).collect();
-        // dbg!(&parsed_header_value);
 
         match (parsed_header_value.get(0), parsed_header_value.get(1)) {
             (Some(&"multipart/byteranges"), Some(&boundary)) => {
@@ -78,7 +77,6 @@ impl HttpClient {
                     .bytes()
                     .await
                     .map_err(|e| GeozeroError::HttpError(e.to_string()))?;
-                // all_bytes.lines_with_terminator() ;
 
                 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
                     haystack
@@ -96,7 +94,6 @@ impl HttpClient {
 
                     // trim front
                     while &result[0..pattern.len()] == pattern {
-                        debug!("trimmed {:?} from front", &result[0..pattern.len()]);
                         result = &result[pattern.len()..];
                         if result.len() < pattern.len() {
                             return result;
@@ -105,10 +102,6 @@ impl HttpClient {
 
                     // trim back
                     while &result[result.len() - pattern.len()..] == pattern {
-                        debug!(
-                            "trimmed {:?} from back",
-                            &result[result.len() - pattern.len()..]
-                        );
                         result = &result[0..result.len() - pattern.len()];
                         if result.len() < pattern.len() {
                             return result;
@@ -160,30 +153,29 @@ impl HttpClient {
                 let mut bytes = BytesMut::new();
                 for part in split_iter(&all_bytes, part_split.as_bytes()) {
                     let part = trimmed(part, "\r\n".as_bytes());
-                    dbg!(String::from_utf8_lossy(part));
+                    // dbg!(String::from_utf8_lossy(part));
                     if part.is_empty() {
-                        debug!("skipping empty body part");
+                        trace!("skipping empty body part");
                         continue;
                     }
                     if part == "--".as_bytes() {
-                        debug!("seeing --");
                         // indicates final closure, should only see once I think
                         debug_assert!(!has_seen_last_part);
                         has_seen_last_part = true;
                         continue;
                     }
 
-                    let (headers, body) = {
+                    let (_headers, body) = {
                         let mut splits = split_iter(part, "\r\n\r\n".as_bytes());
                         let headers = splits.next().expect("missing headers");
                         let body = splits.next().expect("missing body");
                         (headers, body)
                     };
-                    dbg!(String::from_utf8_lossy(headers));
-                    dbg!(String::from_utf8_lossy(body));
+                    //dbg!(String::from_utf8_lossy(headers));
+                    // dbg!(String::from_utf8_lossy(body));
                     bytes.extend(body);
                 }
-                dbg!(&bytes);
+                //dbg!(&bytes);
 
                 // let all_str = String::from_utf8_lossy(&all_bytes);
                 // let trimmed_parts = all_str.split_terminator(&part_split).filter_map(|p| {
@@ -214,7 +206,7 @@ impl HttpClient {
                 //         bytes.extend(body.trim().bytes());
                 //     }
                 // }
-                dbg!(&bytes);
+                // dbg!(&bytes);
                 Ok(bytes.to_bytes())
             }
             _ => {
@@ -253,6 +245,12 @@ impl BufferedHttpClient {
         _min_req_size: usize,
     ) -> Result<&[u8]> {
         self.buf.clear();
+        let ranges_length: usize = byte_ranges.iter().map(|(_start, len)| len).sum();
+        self.bytes_ever_requested += ranges_length;
+        debug!(
+            "ranges: {:?}, length: {}, bytes_ever_requested: {}",
+            byte_ranges, ranges_length, self.bytes_ever_requested
+        );
         let bytes = self.http_client.get_ranges(byte_ranges).await?;
         self.buf.put(bytes);
         self.head = 0;

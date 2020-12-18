@@ -604,7 +604,7 @@ impl PackedRTree {
                         continue;
                     }
                     if is_leaf_node {
-                        debug!("pushing SearchResultItem onto results");
+                        trace!("pushing SearchResultItem onto results");
                         results.push(SearchResultItem {
                             offset: node_item.offset as usize,
                             index: pos - leaf_nodes_offset,
@@ -615,9 +615,10 @@ impl PackedRTree {
                             if head.0.level == next.level - 1 {
                                 merged = true;
                                 let offset = node_item.offset as usize;
-                                debug!(
+                                trace!(
                                     "merging offset: {} into existing NodeRange: {:?}",
-                                    offset, head
+                                    offset,
+                                    head
                                 );
                                 // increasing order is assumed to be consistent with existing impl
                                 // I think this is true by construction, but asserting to be sure

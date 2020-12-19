@@ -244,6 +244,11 @@ impl BufferedHttpClient {
         byte_ranges: Vec<(usize, usize)>,
         min_req_size: usize,
     ) -> Result<&[u8]> {
+        if byte_ranges.len() == 1 {
+            let range = byte_ranges.first().unwrap();
+            return self.get(range.0, range.1, min_req_size).await;
+        }
+
         let byte_ranges = {
             let first = byte_ranges.first().expect("byte_ranges was empty");
             let last = byte_ranges.last().expect("byte_ranges was empty");
@@ -251,11 +256,20 @@ impl BufferedHttpClient {
             let end = last.0 + last.1;
             debug_assert!(start < end);
 
+            // this isn't really used...
+            //if self.head <= start {
+            //    let tail = self.head + self.buf.len();
+            //    if end <= tail {
+            //        debug!("already have requested data for range: {}-{}", start, end);
+            //        let len = end - start;
+            //        return self.get(start, len, min_req_size).await;
+            //    }
+            //}
 
-
-            if end - start < min_req_size {
-                debug!("small request using alternative min_req_size: {}", min_req_size);
-                vec![(start, min_req_size)]
+            let range_span = end - start;
+            if range_span <=min_req_size {
+                debug!("ranges have small span, using a single range request");
+                return self.get(start, range_span, min_req_size).await;
             } else {
                 byte_ranges
             }
@@ -265,14 +279,16 @@ impl BufferedHttpClient {
         self.bytes_ever_requested += ranges_length;
 
         debug!(
-            "ranges: {:?}, length: {}, bytes_ever_requested: {}",
-            byte_ranges, ranges_length, self.bytes_ever_requested
+            "HTTP requested length: {}, bytes_ever_requested: {}, requesting ranges: {:?}",
+            ranges_length, self.bytes_ever_requested, byte_ranges
         );
 
         let bytes = self.http_client.get_ranges(byte_ranges).await?;
 
         self.buf.clear();
         self.buf.put(bytes);
+        // FIXME: This seems super dangerous. We're potentially storing a set of ranges, not a continuous buffer
+        // If we want to utilize the local cache we need some kind of "fetched_ranges" instead of just a "head"
         self.head = 0;
         // TODO: Any benefit to not just blowing everything away?
         let lower = self.head;
@@ -284,8 +300,9 @@ impl BufferedHttpClient {
         &mut self,
         begin: usize,
         length: usize,
-        _min_req_size: usize,
+        min_req_size: usize,
     ) -> Result<&[u8]> {
+        let mut made_request = false;
         let tail = self.head + self.buf.len();
         if begin + length > tail || begin < self.head {
             // Remove bytes before new begin
@@ -299,21 +316,25 @@ impl BufferedHttpClient {
 
             // Read additional bytes
             let range_begin = max(begin, tail);
-            //let range_length = max(begin + length - range_begin, min_req_size);
-            let range_length = begin + length - range_begin;
+            let range_length = max(begin + length - range_begin, min_req_size);
+            //let range_length = begin + length - range_begin;
             self.bytes_ever_requested += range_length;
             debug!(
-                "range: ({} , {}), length: {}, bytes_ever_requested: {}",
+                "HTTP requesting length: {}, bytes_ever_requested: {}, range: ({} , {})",
+                range_length,
+                self.bytes_ever_requested,
                 range_begin,
                 range_begin + range_length,
-                range_length,
-                self.bytes_ever_requested
             );
+            made_request = true;
             let bytes = self.http_client.get(range_begin, range_length).await?;
             self.buf.put(bytes);
         }
         let lower = begin - self.head;
         let upper = begin + length - self.head;
+        if !made_request {
+            debug!("already had cached data for range: ({} , {})", begin, begin + length);
+        }
         Ok(&self.buf[lower..upper])
     }
 }

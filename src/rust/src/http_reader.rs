@@ -28,7 +28,7 @@ pub struct HttpFgbReader {
 impl HttpFgbReader {
     pub async fn open(url: &str) -> Result<HttpFgbReader> {
         let mut client = BufferedHttpClient::new(&url);
-        let min_req_size = 512;
+        let min_req_size = 12 * 1024;
         let bytes = client.get(0, 8, min_req_size).await?;
         if bytes != MAGIC_BYTES {
             return Err(GeozeroError::GeometryFormat);

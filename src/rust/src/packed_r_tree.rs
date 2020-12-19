@@ -556,8 +556,15 @@ impl PackedRTree {
         let num_nodes = level_bounds.first().ok_or(GeozeroError::GeometryIndex)?.1;
         debug!("http_stream_search - index_begin: {}, num_items: {}, node_size: {}, level_bounds: {:?}, GPS bounds:[({}, {}), ({},{})]", index_begin, num_items, node_size, &level_bounds, min_x, min_y, max_x, max_y);
 
-        // read full index at once, if < 1MB
-        let min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1024 * 8);
+        // Get a head start by fetching the three lowest levels at once since they're small and each one avoids
+        // another request:
+        // each node is 40 bytes (5 * 64bit numbers)
+        // 40*16^0+40*16^1+40*16^2 = 10,920
+        // getting the fourth level is substantially larger:
+        // 40*16^3 = 163,840
+        //let first_min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1024 * 11);
+        //let default_min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1024 * 8);
+        let min_req_size = cmp::min(num_nodes * size_of::<NodeItem>(), 1024 * 0);
 
         #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
         struct NodeRange {
@@ -590,6 +597,12 @@ impl PackedRTree {
                 })
                 .collect();
 
+            //let min_req_size = if is_root {
+            //    is_root = false;
+            //    first_min_req_size
+            //} else {
+            //    default_min_req_size
+            //};
             let node_items =
                 read_http_node_items(client, min_req_size, index_begin, node_ranges.clone())
                     .await?;

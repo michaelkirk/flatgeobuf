@@ -70,10 +70,18 @@ impl GeozeroGeometry for FgbFeature {
 impl geozero::FeatureProperties for FgbFeature {
     /// Process feature properties.
     fn process_properties<P: PropertyProcessor>(&self, reader: &mut P) -> Result<bool> {
-        let columns_meta = self
-            .header()
-            .columns()
-            .ok_or(GeozeroError::GeometryFormat)?;
+        let columns_meta = match self.fbs_feature().columns() {
+            Some(feature_columns) => {
+                trace!("using per-feature property schema");
+                Some(feature_columns)
+            }
+            None => {
+                trace!("using per-file property schema");
+                self.header().columns()
+            }
+        }
+        .ok_or(GeozeroError::GeometryFormat)?;
+
         let mut finish = false;
         if let Some(properties) = self.fbs_feature().properties() {
             let mut offset = 0;

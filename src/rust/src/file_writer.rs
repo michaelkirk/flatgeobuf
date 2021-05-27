@@ -2,10 +2,11 @@ use flatbuffers::FlatBufferBuilder;
 
 use std::io::Write;
 
-use crate::FeatureBuilder;
+use crate::{FeatureBuilder, GeometryBuilder};
 
 // TODO:
 // -[x] write empty fgb
+// -[ ] write fgb w/ single point
 // -[ ] write un-indexed fgb w/ features
 //   -[ ] columns
 //     -[ ] fixed schema
@@ -18,7 +19,7 @@ use crate::FeatureBuilder;
 // -[ ] write very large fgb
 
 trait FeatureSource {
-    fn build_feature<'a, 'b>(fbb: FeatureBuilder<'a, 'b>) -> FeatureBuilder<'a, 'b>;
+    fn build_geometry<'a, 'b>(&self, geometry_builder: &mut GeometryBuilder<'a, 'b>);
 }
 
 #[derive(Debug)]
@@ -75,9 +76,17 @@ impl<'w, W: Write> Writer<'w, W> {
     }
 
     fn write_features(&mut self, features: &[impl FeatureSource]) -> Result<()> {
-        let mut fbb = FlatBufferBuilder::new();
-        for feature in features {
-            todo!()
+        for feature_source in features {
+            let mut fbb = FlatBufferBuilder::new();
+            let mut geometry_builder = GeometryBuilder::new(&mut fbb);
+            feature_source.build_geometry(&mut geometry_builder);
+            let geometry = geometry_builder.finish();
+
+            let mut feature_builder = FeatureBuilder::new(&mut fbb);
+            feature_builder.add_geometry(geometry);
+            let feature = feature_builder.finish();
+            fbb.finish_size_prefixed(feature, None);
+            self.write_buf(fbb.finished_data())?;
         }
         Ok(())
     }
@@ -86,18 +95,23 @@ impl<'w, W: Write> Writer<'w, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FgbReader;
+    use crate::{FgbReader, GeometryBuilder, GeometryType};
 
-    struct MyFeature;
-    impl FeatureSource for MyFeature {
-        fn build_feature<'a, 'b>(fbb: FeatureBuilder<'a, 'b>) -> FeatureBuilder<'a, 'b> {
-            todo!()
+    struct MyPoint {
+        xy: [f64; 2],
+    }
+
+    impl FeatureSource for MyPoint {
+        fn build_geometry<'a, 'b>(&self, builder: &mut GeometryBuilder<'a, 'b>) {
+            builder.add_type_(GeometryType::Point);
+            // FIXME: how to add vector? Do I really need to manually coerce the [u8]?
+            // builder.add_xy(flatbuffers::Vector::new(&self.xy, 0));
         }
     }
 
     #[test]
     fn test_write_features() {
-        let input: Vec<MyFeature> = vec![];
+        let input: Vec<MyPoint> = vec![MyPoint { xy: [1.0, 2.0] }, MyPoint { xy: [3.0, 4.0] }];
 
         let mut output: Vec<u8> = vec![];
         {
@@ -108,33 +122,36 @@ mod tests {
 
         use std::io::Cursor;
         let mut cursor = Cursor::new(&*output);
-        let reader = FgbReader::open(&mut cursor).unwrap();
-        assert_eq!(0, reader.features_count());
+        let mut reader = FgbReader::open(&mut cursor).unwrap();
 
         let header = reader.header();
-
-        assert_eq!(header.name(), None);
-        assert_eq!(header.envelope().map(|e| e.safe_slice()), None);
+        assert_eq!(None, header.name());
+        assert_eq!(None, header.envelope().map(|e| e.safe_slice()));
         assert_eq!(
-            header.geometry_type(),
-            crate::header_generated::GeometryType::Unknown
+            crate::header_generated::GeometryType::Unknown,
+            header.geometry_type()
         );
-        assert_eq!(header.hasZ(), false);
-        assert_eq!(header.hasM(), false);
-        assert_eq!(header.hasT(), false);
-        assert_eq!(header.hasTM(), false);
+        assert_eq!(false, header.hasZ());
+        assert_eq!(false, header.hasM());
+        assert_eq!(false, header.hasT());
+        assert_eq!(false, header.hasTM());
         assert!(header.columns().is_none());
-        assert_eq!(header.features_count(), 0);
-        assert_eq!(header.index_node_size(), 16);
-        assert_eq!(header.crs(), None);
-        assert_eq!(header.title(), None);
-        assert_eq!(header.description(), None);
-        assert_eq!(header.metadata(), None);
+        assert_eq!(2, header.features_count());
+        assert_eq!(16, header.index_node_size());
+        assert_eq!(None, header.crs());
+        assert_eq!(None, header.title());
+        assert_eq!(None, header.description());
+        assert_eq!(None, header.metadata());
+
+        assert_eq!(0, reader.features_count());
+        let count = reader.select_all().unwrap();
+        assert_eq!(2, count);
+        assert_eq!(2, reader.features_count());
     }
 
     #[test]
     fn test_write_empty() {
-        let input: Vec<MyFeature> = vec![];
+        let input: Vec<MyPoint> = vec![];
 
         let mut output: Vec<u8> = vec![];
         {
@@ -145,27 +162,31 @@ mod tests {
 
         use std::io::Cursor;
         let mut cursor = Cursor::new(&*output);
-        let reader = FgbReader::open(&mut cursor).unwrap();
-        assert_eq!(0, reader.features_count());
+        let mut reader = FgbReader::open(&mut cursor).unwrap();
 
         let header = reader.header();
 
-        assert_eq!(header.name(), None);
-        assert_eq!(header.envelope().map(|e| e.safe_slice()), None);
+        assert_eq!(None, header.name());
+        assert_eq!(None, header.envelope().map(|e| e.safe_slice()));
         assert_eq!(
-            header.geometry_type(),
-            crate::header_generated::GeometryType::Unknown
+            crate::header_generated::GeometryType::Unknown,
+            header.geometry_type()
         );
-        assert_eq!(header.hasZ(), false);
-        assert_eq!(header.hasM(), false);
-        assert_eq!(header.hasT(), false);
-        assert_eq!(header.hasTM(), false);
+        assert_eq!(false, header.hasZ());
+        assert_eq!(false, header.hasM());
+        assert_eq!(false, header.hasT());
+        assert_eq!(false, header.hasTM());
         assert!(header.columns().is_none());
-        assert_eq!(header.features_count(), 0);
-        assert_eq!(header.index_node_size(), 16);
-        assert_eq!(header.crs(), None);
-        assert_eq!(header.title(), None);
-        assert_eq!(header.description(), None);
-        assert_eq!(header.metadata(), None);
+        assert_eq!(0, header.features_count());
+        assert_eq!(16, header.index_node_size());
+        assert_eq!(None, header.crs());
+        assert_eq!(None, header.title());
+        assert_eq!(None, header.description());
+        assert_eq!(None, header.metadata());
+
+        assert_eq!(0, reader.features_count());
+        let count = reader.select_all().unwrap();
+        assert_eq!(0, count);
+        assert_eq!(0, reader.features_count());
     }
 }

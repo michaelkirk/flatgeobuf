@@ -2,7 +2,8 @@ use flatbuffers::FlatBufferBuilder;
 
 use std::io::Write;
 
-use crate::Feature;
+use crate::FeatureBuilder;
+
 // TODO:
 // -[x] write empty fgb
 // -[ ] write un-indexed fgb w/ features
@@ -16,24 +17,28 @@ use crate::Feature;
 // -[ ] write from FeatureIterator, rather than slice
 // -[ ] write very large fgb
 
+trait FeatureSource {
+    fn build_feature<'a, 'b>(fbb: FeatureBuilder<'a, 'b>) -> FeatureBuilder<'a, 'b>;
+}
+
 #[derive(Debug)]
-struct Writer<'a, W: Write> {
-    inner: &'a mut W,
+struct Writer<'w, W: Write> {
+    inner: &'w mut W,
     bytes_written: usize,
 }
 
 // TODO: better errors
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-impl<'a, W: Write> Writer<'a, W> {
-    pub fn new(writer: &'a mut W) -> Self {
+impl<'w, W: Write> Writer<'w, W> {
+    pub fn new(writer: &'w mut W) -> Self {
         Self {
             inner: writer,
             bytes_written: 0,
         }
     }
 
-    pub fn write(&mut self, features: &[Feature<'_>]) -> Result<()> {
+    pub fn write(&mut self, features: &[impl FeatureSource]) -> Result<()> {
         self.write_magic_bytes()?;
         self.write_header(features.len())?;
         // TODO: reserve index size? self.write_index(features)?;
@@ -69,7 +74,8 @@ impl<'a, W: Write> Writer<'a, W> {
         self.write_buf(fbb.finished_data())
     }
 
-    fn write_features(&mut self, features: &[Feature]) -> Result<()> {
+    fn write_features(&mut self, features: &[impl FeatureSource]) -> Result<()> {
+        let mut fbb = FlatBufferBuilder::new();
         for feature in features {
             todo!()
         }
@@ -80,12 +86,55 @@ impl<'a, W: Write> Writer<'a, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::FgbReader;
+
+    struct MyFeature;
+    impl FeatureSource for MyFeature {
+        fn build_feature<'a, 'b>(fbb: FeatureBuilder<'a, 'b>) -> FeatureBuilder<'a, 'b> {
+            todo!()
+        }
+    }
+
+    #[test]
+    fn test_write_features() {
+        let input: Vec<MyFeature> = vec![];
+
+        let mut output: Vec<u8> = vec![];
+        {
+            let mut writer = Writer::new(&mut output);
+            let result = writer.write(&input);
+            assert!(result.is_ok());
+        }
+
+        use std::io::Cursor;
+        let mut cursor = Cursor::new(&*output);
+        let reader = FgbReader::open(&mut cursor).unwrap();
+        assert_eq!(0, reader.features_count());
+
+        let header = reader.header();
+
+        assert_eq!(header.name(), None);
+        assert_eq!(header.envelope().map(|e| e.safe_slice()), None);
+        assert_eq!(
+            header.geometry_type(),
+            crate::header_generated::GeometryType::Unknown
+        );
+        assert_eq!(header.hasZ(), false);
+        assert_eq!(header.hasM(), false);
+        assert_eq!(header.hasT(), false);
+        assert_eq!(header.hasTM(), false);
+        assert!(header.columns().is_none());
+        assert_eq!(header.features_count(), 0);
+        assert_eq!(header.index_node_size(), 16);
+        assert_eq!(header.crs(), None);
+        assert_eq!(header.title(), None);
+        assert_eq!(header.description(), None);
+        assert_eq!(header.metadata(), None);
+    }
 
     #[test]
     fn test_write_empty() {
-        let input: Vec<Feature> = vec![];
+        let input: Vec<MyFeature> = vec![];
 
         let mut output: Vec<u8> = vec![];
         {

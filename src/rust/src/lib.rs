@@ -81,6 +81,7 @@ extern crate log;
 #[allow(unused_imports, non_snake_case)]
 mod feature_generated;
 mod file_reader;
+mod file_writer;
 mod geometry_reader;
 #[allow(unused_imports, non_snake_case)]
 mod header_generated;

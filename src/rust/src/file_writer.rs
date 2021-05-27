@@ -107,8 +107,19 @@ mod tests {
     struct MyCoord { x: f64, y: f64 }
     struct MyPoint(MyCoord);
     impl MyPoint {
-        fn as_vec(&self) -> Vec<f64> {
+        pub fn as_vec(&self) -> Vec<f64> {
             vec![self.0.x, self.0.y]
+        }
+    }
+    struct MyLineString(Vec<MyCoord>);
+    impl MyLineString {
+        pub fn as_vec(&self) -> Vec<f64> {
+            let mut output: Vec<f64> = Vec::with_capacity(self.0.len() * 2);
+            for coord in &self.0 {
+                output.push(coord.x);
+                output.push(coord.y);
+            }
+            output
         }
     }
 
@@ -117,17 +128,50 @@ mod tests {
             &'a self,
             flatbuffer_builder: &mut FlatBufferBuilder<'a>,
         ) -> WIPOffset<Geometry<'a>> {
-            let xy = flatbuffer_builder.create_vector(&self.as_vec());
+            let coord = flatbuffer_builder.create_vector(&self.as_vec());
             let mut geometry_builder = GeometryBuilder::new(flatbuffer_builder);
-            geometry_builder.add_xy(xy);
             geometry_builder.add_type_(GeometryType::Point);
+            geometry_builder.add_xy(coord);
             geometry_builder.finish()
+        }
+    }
+
+    impl FeatureSource for MyLineString {
+        fn build_geometry<'a>(
+            &'a self,
+            flatbuffer_builder: &mut FlatBufferBuilder<'a>,
+        ) -> WIPOffset<Geometry<'a>> {
+            let coords = flatbuffer_builder.create_vector(&self.as_vec());
+            let mut geometry_builder = GeometryBuilder::new(flatbuffer_builder);
+            geometry_builder.add_type_(GeometryType::LineString);
+            geometry_builder.add_xy(coords);
+            geometry_builder.finish()
+        }
+    }
+
+    enum MyGeometry {
+        Point(MyPoint),
+        LineString(MyLineString)
+    }
+    impl FeatureSource for MyGeometry {
+        fn build_geometry<'a>(
+            &'a self,
+            flatbuffer_builder: &mut FlatBufferBuilder<'a>,
+        ) -> WIPOffset<Geometry<'a>> {
+            match self {
+                MyGeometry::Point(g) => g.build_geometry(flatbuffer_builder),
+                MyGeometry::LineString(g) => g.build_geometry(flatbuffer_builder),
+            }
         }
     }
 
     #[test]
     fn test_write_features() {
-        let input: Vec<MyPoint> = vec![MyPoint(MyCoord { x: 1.0, y: 2.0}), MyPoint(MyCoord { x: 3.0, y:4.0 })];
+        let input: Vec<MyGeometry> = vec![
+            MyGeometry::Point(MyPoint(MyCoord { x: 1.0, y: 2.0})),
+            MyGeometry::LineString(MyLineString(vec![MyCoord { x: 5.0, y: 6.0}, MyCoord { x: 7.0, y: 8.0 }, MyCoord { x: 9.0, y: 10.0 }])),
+            MyGeometry::Point(MyPoint(MyCoord { x: 3.0, y: 4.0})),
+        ];
 
         let mut output: Vec<u8> = vec![];
         {
@@ -152,7 +196,7 @@ mod tests {
         assert_eq!(false, header.hasT());
         assert_eq!(false, header.hasTM());
         assert!(header.columns().is_none());
-        assert_eq!(2, header.features_count());
+        assert_eq!(3, header.features_count());
         assert_eq!(0, header.index_node_size());
         assert_eq!(None, header.crs());
         assert_eq!(None, header.title());
@@ -161,17 +205,23 @@ mod tests {
 
         assert_eq!(0, reader.features_count());
         let count = reader.select_all().unwrap();
-        assert_eq!(2, count);
-        assert_eq!(2, reader.features_count());
+        assert_eq!(3, count);
+        assert_eq!(3, reader.features_count());
 
         use fallible_streaming_iterator::FallibleStreamingIterator;
+
+        let mut types = vec![];
         let mut coords = vec![];
         while let Some(next) = reader.next().unwrap() {
             let geometry = next.geometry().unwrap();
-            assert_eq!(GeometryType::Point, geometry.type_());
+            types.push(geometry.type_());
             coords.push(geometry.xy().unwrap().safe_slice().to_vec());
         }
-        assert_eq!(vec![vec![1.0, 2.0], vec![3.0, 4.0]], coords);
+
+        assert_eq!(vec![GeometryType::Point, GeometryType::LineString, GeometryType::Point], types);
+        assert_eq!(vec![vec![1.0, 2.0],
+                        vec![5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+                        vec![3.0, 4.0]], coords);
     }
 
     #[test]

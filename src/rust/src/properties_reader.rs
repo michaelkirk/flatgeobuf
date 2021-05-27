@@ -90,9 +90,11 @@ impl geozero::FeatureProperties for FgbFeature {
                 // trailing byte in the last column of type Binary
                 let i = LittleEndian::read_u16(&properties[offset..offset + 2]) as usize;
                 offset += size_of::<u16>();
+                trace!("i: {}", i);
                 let column = &columns_meta.get(i);
                 match column.type_() {
                     ColumnType::Int => {
+                        trace!("reading Int column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -103,6 +105,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<i32>();
                     }
                     ColumnType::Long => {
+                        trace!("reading Long column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -113,6 +116,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<i64>();
                     }
                     ColumnType::ULong => {
+                        trace!("reading ULong column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -123,6 +127,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<u64>();
                     }
                     ColumnType::Double => {
+                        trace!("reading Double column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -133,6 +138,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<f64>();
                     }
                     ColumnType::String => {
+                        trace!("reading String column");
                         let len = LittleEndian::read_u32(&properties[offset..offset + 4]) as usize;
                         offset += size_of::<u32>();
                         finish = reader.property(
@@ -150,6 +156,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += len;
                     }
                     ColumnType::Byte => {
+                        trace!("reading Byte column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -158,6 +165,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<i8>();
                     }
                     ColumnType::UByte => {
+                        trace!("reading UByte column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -166,6 +174,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<u8>();
                     }
                     ColumnType::Bool => {
+                        trace!("reading Bool column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -174,6 +183,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<u8>();
                     }
                     ColumnType::Short => {
+                        trace!("reading Short column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -184,6 +194,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<i16>();
                     }
                     ColumnType::UShort => {
+                        trace!("reading UShort column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -194,6 +205,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<u16>();
                     }
                     ColumnType::UInt => {
+                        trace!("reading UInt column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -204,6 +216,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<u32>();
                     }
                     ColumnType::Float => {
+                        trace!("reading Float column");
                         finish = reader.property(
                             i,
                             &column.name(),
@@ -214,6 +227,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += size_of::<f32>();
                     }
                     ColumnType::Json => {
+                        trace!("reading Json column");
                         let len = LittleEndian::read_u32(&properties[offset..offset + 4]) as usize;
                         offset += size_of::<u32>();
                         finish = reader.property(
@@ -231,6 +245,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += len;
                     }
                     ColumnType::DateTime => {
+                        trace!("reading DateTime column");
                         let len = LittleEndian::read_u32(&properties[offset..offset + 4]) as usize;
                         offset += size_of::<u32>();
                         finish = reader.property(
@@ -248,6 +263,7 @@ impl geozero::FeatureProperties for FgbFeature {
                         offset += len;
                     }
                     ColumnType::Binary => {
+                        trace!("reading Binary column");
                         let len = LittleEndian::read_u32(&properties[offset..offset + 4]) as usize;
                         offset += size_of::<u32>();
                         finish = reader.property(

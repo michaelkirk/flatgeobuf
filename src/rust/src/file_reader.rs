@@ -69,7 +69,11 @@ impl<'a, R: Read + Seek> FgbReader<'a, R> {
     pub fn select_all(&mut self) -> Result<usize> {
         let header = self.fbs.header();
         let count = header.features_count() as usize;
-        let index_size = PackedRTree::index_size(count, header.index_node_size());
+        let index_size = if count == 0 || header.index_node_size() == 0 {
+            0
+        } else {
+            PackedRTree::index_size(count, header.index_node_size())
+        };
         // Skip index
         self.feature_base = self.reader.seek(SeekFrom::Current(index_size as i64))?;
         self.count = count;

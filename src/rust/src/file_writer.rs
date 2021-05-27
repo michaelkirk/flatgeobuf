@@ -104,13 +104,21 @@ mod tests {
     use crate::{FgbReader, Geometry, GeometryBuilder, GeometryType};
     use flatbuffers::WIPOffset;
 
-    struct MyCoord { x: f64, y: f64 }
-    struct MyPoint(MyCoord);
+    struct MyCoord {
+        x: f64,
+        y: f64,
+    }
+
+    struct MyPoint {
+        coord: MyCoord,
+        my_prop: bool,
+    }
     impl MyPoint {
         pub fn as_vec(&self) -> Vec<f64> {
-            vec![self.0.x, self.0.y]
+            vec![self.coord.x, self.coord.y]
         }
     }
+
     struct MyLineString(Vec<MyCoord>);
     impl MyLineString {
         pub fn as_vec(&self) -> Vec<f64> {
@@ -149,10 +157,12 @@ mod tests {
         }
     }
 
+    // "One-of" enum which just delegates to its inner type
     enum MyGeometry {
         Point(MyPoint),
-        LineString(MyLineString)
+        LineString(MyLineString),
     }
+
     impl FeatureSource for MyGeometry {
         fn build_geometry<'a>(
             &'a self,
@@ -168,9 +178,19 @@ mod tests {
     #[test]
     fn test_write_features() {
         let input: Vec<MyGeometry> = vec![
-            MyGeometry::Point(MyPoint(MyCoord { x: 1.0, y: 2.0})),
-            MyGeometry::LineString(MyLineString(vec![MyCoord { x: 5.0, y: 6.0}, MyCoord { x: 7.0, y: 8.0 }, MyCoord { x: 9.0, y: 10.0 }])),
-            MyGeometry::Point(MyPoint(MyCoord { x: 3.0, y: 4.0})),
+            MyGeometry::Point(MyPoint {
+                coord: MyCoord { x: 1.0, y: 2.0 },
+                my_prop: true,
+            }),
+            MyGeometry::LineString(MyLineString(vec![
+                MyCoord { x: 5.0, y: 6.0 },
+                MyCoord { x: 7.0, y: 8.0 },
+                MyCoord { x: 9.0, y: 10.0 },
+            ])),
+            MyGeometry::Point(MyPoint {
+                coord: MyCoord { x: 3.0, y: 4.0 },
+                my_prop: false,
+            }),
         ];
 
         let mut output: Vec<u8> = vec![];
@@ -218,10 +238,22 @@ mod tests {
             coords.push(geometry.xy().unwrap().safe_slice().to_vec());
         }
 
-        assert_eq!(vec![GeometryType::Point, GeometryType::LineString, GeometryType::Point], types);
-        assert_eq!(vec![vec![1.0, 2.0],
-                        vec![5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
-                        vec![3.0, 4.0]], coords);
+        assert_eq!(
+            vec![
+                GeometryType::Point,
+                GeometryType::LineString,
+                GeometryType::Point
+            ],
+            types
+        );
+        assert_eq!(
+            vec![
+                vec![1.0, 2.0],
+                vec![5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+                vec![3.0, 4.0]
+            ],
+            coords
+        );
     }
 
     #[test]

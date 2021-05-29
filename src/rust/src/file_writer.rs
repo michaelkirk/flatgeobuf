@@ -17,7 +17,7 @@ use crate::{Column, FeatureBuilder, Geometry};
 // -[ ] write from FeatureIterator, rather than slice
 // -[ ] write very large fgb
 
-trait FeatureSource {
+pub trait FeatureSource {
     fn build_geometry<'a>(
         &'a self,
         flatbuffer_builder: &mut FlatBufferBuilder<'a>,

@@ -94,6 +94,7 @@ mod properties_reader;
 
 pub use feature_generated::*;
 pub use file_reader::*;
+pub use file_writer::{FeatureSource, Writer};
 pub use geometry_reader::*;
 pub use header_generated::*;
 #[cfg(feature = "http")]

@@ -1,4 +1,4 @@
-use flatbuffers::{FlatBufferBuilder, WIPOffset};
+use flatbuffers::{FlatBufferBuilder, ForwardsUOffset, Vector, WIPOffset};
 
 use std::io::Write;
 
@@ -28,26 +28,24 @@ pub trait FeatureSource {
     fn build_feature_schema_properties<'a>(
         &'a self,
         flatbuffer_builder: &mut FlatBufferBuilder<'a>,
-    ) -> Option<(
-        // Columns (property schema)
-        WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Column<'a>>>>,
-        // Property Data
-        WIPOffset<flatbuffers::Vector<'a, u8>>,
-    )>;
+    ) -> (
+        Option<WIPOffset<Vector<'a, ForwardsUOffset<Column<'a>>>>>,
+        Option<WIPOffset<Vector<'a, u8>>>,
+    );
 }
 
 #[derive(Debug)]
-struct Writer<'w, W: Write> {
+pub struct Writer<W: Write> {
     include_index: bool,
-    inner: &'w mut W,
+    inner: W,
     bytes_written: usize,
 }
 
 // TODO: better errors
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-impl<'w, W: Write> Writer<'w, W> {
-    pub fn new(writer: &'w mut W) -> Self {
+impl<W: Write> Writer<W> {
+    pub fn new(writer: W) -> Self {
         Self {
             include_index: false,
             inner: writer,
@@ -100,13 +98,19 @@ impl<'w, W: Write> Writer<'w, W> {
         for feature_source in features {
             let mut fbb = FlatBufferBuilder::new();
             let geometry = feature_source.build_geometry(&mut fbb);
-            let properties = feature_source.build_feature_schema_properties(&mut fbb);
+            let (columns, properties) = feature_source.build_feature_schema_properties(&mut fbb);
+
             let mut feature_builder = FeatureBuilder::new(&mut fbb);
             feature_builder.add_geometry(geometry);
-            if let Some((columns, properties)) = properties {
+
+            if let Some(columns) = columns {
                 feature_builder.add_columns(columns);
+            }
+
+            if let Some(properties) = properties {
                 feature_builder.add_properties(properties);
             }
+
             let feature = feature_builder.finish();
             fbb.finish_size_prefixed(feature, None);
             self.write_buf(fbb.finished_data())?;
@@ -119,6 +123,7 @@ impl<'w, W: Write> Writer<'w, W> {
 mod tests {
     use super::*;
     use crate::{FgbReader, Geometry, GeometryBuilder, GeometryType};
+    use byteorder::{ByteOrder, LittleEndian};
     use flatbuffers::{ForwardsUOffset, Vector, WIPOffset};
 
     struct MyCoord {
@@ -165,10 +170,10 @@ mod tests {
         fn build_feature_schema_properties<'a>(
             &'a self,
             flatbuffer_builder: &mut FlatBufferBuilder<'a>,
-        ) -> Option<(
-            WIPOffset<Vector<'a, ForwardsUOffset<Column<'a>>>>,
-            WIPOffset<Vector<'a, u8>>,
-        )> {
+        ) -> (
+            Option<WIPOffset<Vector<'a, ForwardsUOffset<Column<'a>>>>>,
+            Option<WIPOffset<Vector<'a, u8>>>,
+        ) {
             use crate::{ColumnArgs, ColumnType};
 
             let column_name = flatbuffer_builder.create_string("my_prop");
@@ -205,8 +210,9 @@ mod tests {
 
             // for each column:
             // write column idx as u16 (little endian)
-            properties_bytes.push(0);
-            properties_bytes.push(0);
+            let mut column_index = [0u8; 2];
+            LittleEndian::write_u16(&mut column_index, 0);
+            properties_bytes.extend_from_slice(&column_index);
 
             // write column data
             properties_bytes.push(if self.my_prop { 1 } else { 0 });
@@ -216,7 +222,7 @@ mod tests {
 
             let properties_offset = flatbuffer_builder.create_vector(&properties_bytes);
 
-            Some((columns, properties_offset))
+            (Some(columns), Some(properties_offset))
         }
     }
 
@@ -235,12 +241,12 @@ mod tests {
         fn build_feature_schema_properties<'a>(
             &'a self,
             _flatbuffer_builder: &mut FlatBufferBuilder<'a>,
-        ) -> Option<(
-            WIPOffset<Vector<'a, ForwardsUOffset<Column<'a>>>>,
-            WIPOffset<Vector<'a, u8>>,
-        )> {
+        ) -> (
+            Option<WIPOffset<Vector<'a, ForwardsUOffset<Column<'a>>>>>,
+            Option<WIPOffset<Vector<'a, u8>>>,
+        ) {
             // Nothing yet...
-            None
+            (None, None)
         }
     }
 
@@ -264,16 +270,26 @@ mod tests {
         fn build_feature_schema_properties<'a>(
             &'a self,
             flatbuffer_builder: &mut FlatBufferBuilder<'a>,
-        ) -> Option<(
-            WIPOffset<Vector<'a, ForwardsUOffset<Column<'a>>>>,
-            WIPOffset<Vector<'a, u8>>,
-        )> {
+        ) -> (
+            Option<WIPOffset<Vector<'a, ForwardsUOffset<Column<'a>>>>>,
+            Option<WIPOffset<Vector<'a, u8>>>,
+        ) {
             match self {
                 MyGeometry::Point(g) => g.build_feature_schema_properties(flatbuffer_builder),
                 MyGeometry::LineString(g) => g.build_feature_schema_properties(flatbuffer_builder),
             }
         }
     }
+
+    // Test cases:
+    // empty file, no props
+    // empty file, properties defined
+    // file with 1pt, no properties
+    // empty file, no index
+    // file with 1pt, w/ per feature properties
+    // file with 1pt, w/ per file properties
+    // file with 1pt, w/ per feature and per file properties
+    // file with per file properties, but mix of per feature props
 
     #[test]
     fn test_write_features() {

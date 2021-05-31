@@ -21,50 +21,12 @@ const plugins = [
 ]
 
 export default [{
-  input: './lib/mjs/generic.js',
-  output: {
-    file: 'dist/flatgeobuf.min.js',
-    format: 'umd',
-    name: 'flatgeobuf',
-    sourcemap: true
-  },
-  plugins
-},{
   input: './lib/mjs/geojson.js',
   output: {
     file: 'dist/flatgeobuf-geojson.min.js',
     format: 'umd',
     name: 'flatgeobuf',
     sourcemap: true
-  },
-  plugins
-}, {
-  input: './lib/mjs/ol.js',
-  external: [
-    'ol/Feature',
-    'ol/geom/Point',
-    'ol/geom/MultiPoint',
-    'ol/geom/LineString',
-    'ol/geom/MultiLineString',
-    'ol/geom/Polygon',
-    'ol/geom/MultiPolygon',
-    'ol/geom/GeometryLayout'
-  ],
-  output: {
-    file: 'dist/flatgeobuf-ol.min.js',
-    format: 'umd',
-    name: 'flatgeobuf',
-    sourcemap: true,
-    globals: {
-      'ol/Feature': 'ol.Feature',
-      'ol/geom/Point': 'ol.geom.Point',
-      'ol/geom/MultiPoint': 'ol.geom.MultiPoint',
-      'ol/geom/LineString': 'ol.geom.LineString',
-      'ol/geom/MultiLineString': 'ol.geom.MultiLineString',
-      'ol/geom/Polygon': 'ol.geom.Polygon',
-      'ol/geom/MultiPolygon': 'ol.geom.MultiPolygon',
-      'ol/geom/GeometryLayout': 'ol.geom.GeometryLayout'
-    }
   },
   plugins
 }]

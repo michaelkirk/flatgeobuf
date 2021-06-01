@@ -56,6 +56,7 @@
                 };
 
                 console.log(feature);
+                const osm_id = feature.properties["osm_id"];
 
                 // Add the feature to the map
                 L.geoJSON(feature, { 
@@ -78,7 +79,7 @@
                     }
                 })
                 // show some per-feature properties when clicking on the feature
-                .bindPopup(`<h1>${feature.properties["NAME"]} ${feature.properties["LSAD"]}, ${feature.properties["STATE"]}</h1>`)
+                    .bindPopup(`<h1>OSM: ${osm_id}</h1><a href="https://www.openstreetmap.org/node/${osm_id}">View on OpenStreetMap</a>`)
                 .addTo(map);
             }
         });

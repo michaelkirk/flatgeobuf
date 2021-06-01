@@ -1,5 +1,6 @@
 import { Feature } from '../feature'
 import { Geometry } from '../geometry'
+import { GeometryType } from '../geometry-type'
 import HeaderMeta from '../HeaderMeta'
 import ColumnMeta from '../ColumnMeta'
 import { fromGeometry, IGeoJsonGeometry } from './geometry'

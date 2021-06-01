@@ -40,6 +40,7 @@ impl<'a, R: Read + Seek> FgbReader<'a, R> {
             // minimum size check avoids panic in FlatBuffers header decoding
             return Err(GeozeroError::GeometryFormat);
         }
+        debug!("header_size: {:?}", header_size);
         let mut header_buf = Vec::with_capacity(header_size + 4);
         header_buf.extend_from_slice(&size_buf);
         header_buf.resize(header_buf.capacity(), 0);
@@ -151,15 +152,19 @@ impl<'a, R: Read + Seek> FallibleStreamingIterator for FgbReader<'a, R> {
             return Ok(());
         }
         if let Some(filter) = &self.item_filter {
+            debug!("reading next feature from filter");
             let item = &filter[self.feat_no];
             self.reader
                 .seek(SeekFrom::Start(self.feature_base + item.offset as u64))?;
+        } else {
+            debug!("reading next feature, no filter");
         }
         self.feat_no += 1;
         self.fbs.feature_buf.resize(4, 0);
         self.reader.read_exact(&mut self.fbs.feature_buf)?;
         let sbuf = &self.fbs.feature_buf;
         let feature_size = u32::from_le_bytes([sbuf[0], sbuf[1], sbuf[2], sbuf[3]]) as usize;
+        debug!("feature_size: {:?}", feature_size);
         self.fbs.feature_buf.resize(feature_size + 4, 0);
         self.reader.read_exact(&mut self.fbs.feature_buf[4..])?;
         // verify flatbuffer

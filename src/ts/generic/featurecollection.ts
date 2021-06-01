@@ -82,28 +82,39 @@ export async function* deserializeStream(stream: ReadableStream, fromFeature: Fr
 {
     const reader = slice(stream)
     const read: ReadFn = async size => await reader.slice(size)
+    Logger.debug("deserializeStream");
 
     let bytes = new Uint8Array(await read(8, 'magic bytes'))
     if (!bytes.every((v, i) => magicbytes[i] === v))
         throw new Error('Not a FlatGeobuf file')
+    Logger.debug("verified magic bytes");
+
     bytes = new Uint8Array(await read(4, 'header length'))
     let bb = new flatbuffers.ByteBuffer(bytes)
     const headerLength = bb.readUint32(0)
     bytes = new Uint8Array(await read(headerLength, 'header data'))
     bb = new flatbuffers.ByteBuffer(bytes)
+    Logger.debug(`read header length: ${headerLength}`);
 
     const headerMeta = HeaderMeta.fromByteBuffer(bb);
     if (headerMetaFn)
         headerMetaFn(headerMeta)
+    Logger.debug("read header");
 
     const { indexNodeSize, featuresCount } = headerMeta
     if (indexNodeSize > 0) {
+        Logger.debug("about to calcTreeSize");
         const treeSize = calcTreeSize(featuresCount, indexNodeSize)
         await read(treeSize, 'entire index, w/o rect')
+    } else {
+        Logger.debug("File has no index");
     }
+    Logger.debug("about to read features");
     let feature : IFeature | undefined
-    while ((feature = await readFeature(read, headerMeta, fromFeature)))
+    while ((feature = await readFeature(read, headerMeta, fromFeature))) {
+        Logger.debug("read feature");
         yield feature
+    }
 }
 
 export async function *deserializeFiltered(url: string, rect: Rect, fromFeature: FromFeatureFn, headerMetaFn?: HeaderMetaFn)
@@ -122,10 +133,13 @@ export async function *deserializeFiltered(url: string, rect: Rect, fromFeature:
 
 async function readFeature(read: ReadFn, headerMeta: HeaderMeta, fromFeature: FromFeatureFn): Promise<IFeature | undefined> {
     let bytes = new Uint8Array(await read(4, 'feature length'))
-    if (bytes.byteLength === 0)
+    if (bytes.byteLength === 0) {
+        Logger.debug("byteLength was 0");
         return
+    }
     let bb = new flatbuffers.ByteBuffer(bytes)
     const featureLength = bb.readUint32(0)
+    Logger.debug(`feature length: ${featureLength}`);
     bytes = new Uint8Array(await read(featureLength, 'feature data'))
     const bytesAligned = new Uint8Array(featureLength + 4)
     bytesAligned.set(bytes, 4)

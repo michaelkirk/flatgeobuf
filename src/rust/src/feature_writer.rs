@@ -466,7 +466,7 @@ mod test {
     use super::*;
     use crate::header_generated::*;
     use crate::FgbFeature;
-    use geozero::geojson::{read_geojson_geom, GeoJson, GeoJsonWriter};
+    use geozero::geojson::{GeoJson, GeoJsonWriter};
     use geozero::{FeatureAccess, GeozeroDatasource};
 
     fn header(geometry_type: GeometryType) -> Vec<u8> {
@@ -511,7 +511,11 @@ mod test {
     fn json_to_fbg_to_json_n(geojson: &str, geometry_type: GeometryType, with_z: bool) -> Vec<u8> {
         let mut fgb_writer = FeatureWriter::new(geometry_type, false, false);
         fgb_writer.dims.z = with_z;
-        assert!(dbg!(read_geojson_geom(&mut geojson.as_bytes(), &mut fgb_writer)).is_ok());
+        assert!(dbg!(geozero::geojson::read_geojson(
+            &mut geojson.as_bytes(),
+            &mut fgb_writer
+        ))
+        .is_ok());
         let mut out: Vec<u8> = Vec::new();
         let f = FgbFeature {
             header_buf: header(geometry_type),
@@ -609,7 +613,7 @@ mod test {
                 GeometryType::GeometryCollection
             ))
             .unwrap(),
-            r#"{"type": "Point", "coordinates": [100.1,0.1]},{"type": "LineString", "coordinates": [[101.1,0.1],[102.1,1.1]]}"#,
+            geojson,
         );
 
         let mut geojson = GeoJson(
@@ -675,11 +679,7 @@ mod test {
         let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, true, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
-        // assert_eq!(json, geojson.0); // geozero JSON writer skips GeometryCollection
-        assert_eq!(
-            json,
-            r#"{"type": "Feature", "properties": {"fid": 0, "name": "Collection"}, "geometry": {"type": "Point", "coordinates": [100.1,0.1]},{"type": "LineString", "coordinates": [[101.1,0.1],[102.1,1.1]]}}"#
-        );
+        assert_eq!(json, geojson.0);
         Ok(())
     }
 
@@ -727,11 +727,7 @@ mod test {
         let mut fgb_writer = FeatureWriter::new(GeometryType::GeometryCollection, false, true);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
-        // assert_eq!(json, single); // geozero JSON writer skips GeometryCollection
-        assert_eq!(
-            json,
-            r#"{"type": "Feature", "properties": {"fid": 0, "name": "Collection"}, "geometry": {"type": "Point", "coordinates": [100.1,0.1]},{"type": "LineString", "coordinates": [[101.1,0.1],[102.1,1.1]]}}"#
-        );
+        assert_eq!(json, single);
 
         Ok(())
     }

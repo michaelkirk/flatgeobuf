@@ -43,9 +43,10 @@ harness = false
 name = "geojson"
 harness = false
 
-#[patch.crates-io]
+[patch.crates-io]
 # Patch geozero dependencies (dev only)
-#geozero = { path = "../../../../rust/geozero/geozero" }
+# geozero = { path = "../../../../rust/geozero/geozero" }
+geozero = { git = "https://github.com/michaelkirk/geozero", branch = "mkirk/feature-collection-to-wkt" }
 
 [package.metadata.docs.rs]
 all-features = true

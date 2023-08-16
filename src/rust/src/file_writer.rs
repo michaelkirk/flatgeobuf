@@ -328,10 +328,10 @@ impl<'a> FgbWriter<'a> {
             let mut offset = 0;
             let index_nodes = self
                 .feat_nodes
-                .iter()
-                .map(|tmpnode| {
-                    let feat = &self.feat_offsets[tmpnode.offset as usize];
-                    let mut node = tmpnode.clone();
+                .clone()
+                .into_iter()
+                .map(|mut node| {
+                    let feat = &self.feat_offsets[node.offset as usize];
                     node.offset = offset;
                     offset += feat.size as u64;
                     node

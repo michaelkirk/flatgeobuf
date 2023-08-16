@@ -254,7 +254,8 @@ fn hilbert_bbox(r: &NodeItem, hilbert_max: u32, extent: &NodeItem) -> u32 {
 }
 
 pub fn hilbert_sort(items: &mut [NodeItem], extent: &NodeItem) {
-    items.sort_by(|a, b| {
+    use rayon::slice::ParallelSliceMut;
+    items.par_sort_by(|a, b| {
         let ha = hilbert_bbox(a, HILBERT_MAX, extent);
         let hb = hilbert_bbox(b, HILBERT_MAX, extent);
         hb.partial_cmp(&ha).unwrap() // ha > hb

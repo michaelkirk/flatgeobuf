@@ -55,6 +55,8 @@ pub struct FgbWriterOptions<'a> {
     pub detect_type: bool,
     /// Convert single to multi geometries, if `geometry_type` is multi type or Unknown
     pub promote_to_multi: bool,
+    /// Don't write empty fields. Affects Strings and Byte fields.
+    pub skip_empty_properties: bool,
     /// CRS definition
     pub crs: FgbCrs<'a>,
     /// Does geometry have Z dimension?
@@ -79,6 +81,7 @@ impl Default for FgbWriterOptions<'_> {
             write_index: true,
             detect_type: true,
             promote_to_multi: true,
+            skip_empty_properties: false,
             crs: Default::default(),
             has_z: false,
             has_m: false,
@@ -197,6 +200,7 @@ impl<'a> FgbWriter<'a> {
             header_args.geometry_type,
             options.detect_type,
             options.promote_to_multi,
+            options.skip_empty_properties,
             dims,
         );
 

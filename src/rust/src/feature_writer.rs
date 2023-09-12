@@ -29,6 +29,8 @@ pub struct FeatureWriter<'a> {
     detect_type: bool,
     // Convert single to multi geometries, if declared as multi type or Unknown
     promote_to_multi: bool,
+    // Skip writing empty fields. Affects String and Byte fields.
+    skip_empty_properties: bool,
     parts: Vec<flatbuffers::WIPOffset<Geometry<'a>>>,
     geom_state: GeomState,
     properties: Vec<u8>,
@@ -61,11 +63,13 @@ impl<'a> FeatureWriter<'a> {
         dataset_type: GeometryType,
         detect_type: bool,
         promote_to_multi: bool,
+        skip_empty_properties: bool,
     ) -> FeatureWriter<'a> {
         Self::with_dims(
             dataset_type,
             detect_type,
             promote_to_multi,
+            skip_empty_properties,
             CoordDimensions::default(),
         )
     }
@@ -73,6 +77,7 @@ impl<'a> FeatureWriter<'a> {
         dataset_type: GeometryType,
         detect_type: bool,
         promote_to_multi: bool,
+        skip_empty_properties: bool,
         dims: CoordDimensions,
     ) -> FeatureWriter<'a> {
         FeatureWriter {
@@ -87,6 +92,7 @@ impl<'a> FeatureWriter<'a> {
             dataset_type,
             detect_type,
             promote_to_multi,
+            skip_empty_properties,
             parts: Vec::new(),
             geom_state: GeomState::Normal,
             properties: Vec::new(),
@@ -440,8 +446,21 @@ pub(crate) fn prop_type(colval: &ColumnValue) -> ColumnType {
     }
 }
 
+fn column_value_is_empty(val: &ColumnValue) -> bool {
+    match val {
+        ColumnValue::String(s) | ColumnValue::Json(s) | ColumnValue::DateTime(s) => s.is_empty(),
+        ColumnValue::Binary(b) => b.is_empty(),
+        // Numeric types cannot be empty.
+        _ => false,
+    }
+}
+
 impl PropertyProcessor for FeatureWriter<'_> {
     fn property(&mut self, i: usize, _colname: &str, colval: &ColumnValue) -> Result<bool> {
+        if self.skip_empty_properties && column_value_is_empty(colval) {
+            return Ok(false);
+        }
+
         let ofs = self.properties.len();
         self.properties
             .resize(ofs + size_of::<u16>() + prop_size(colval), 0);
@@ -512,8 +531,9 @@ mod test {
 
     fn write_as_geojson(mut fgb_writer: FeatureWriter) -> Result<String> {
         let mut out: Vec<u8> = Vec::new();
+        let header = header(fgb_writer.dataset_type);
         let feat = FgbFeature {
-            header_buf: header(fgb_writer.dataset_type),
+            header_buf: header,
             feature_buf: fgb_writer.finish_to_feature(),
         };
         // dbg!(&feat.fbs_feature());
@@ -526,7 +546,7 @@ mod test {
         geometry_type: GeometryType,
         dims: CoordDimensions,
     ) -> Vec<u8> {
-        let mut fgb_writer = FeatureWriter::with_dims(geometry_type, false, false, dims);
+        let mut fgb_writer = FeatureWriter::with_dims(geometry_type, false, false, false, dims);
         assert!(dbg!(read_geojson_geom(&mut geojson.as_bytes(), &mut fgb_writer)).is_ok());
         let mut out: Vec<u8> = Vec::new();
         let f = FgbFeature {
@@ -630,7 +650,8 @@ mod test {
         let mut geojson = GeoJson(
             r#"{"type": "Point", "coordinates": [2223639.4731508396,-15878634.348995442]}"#,
         );
-        let mut fgb_writer = FeatureWriter::new(GeometryType::GeometryCollection, false, false);
+        let mut fgb_writer =
+            FeatureWriter::new(GeometryType::GeometryCollection, false, false, false);
         let result = geojson.process(&mut fgb_writer);
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -644,7 +665,7 @@ mod test {
         let mut geojson = GeoJson(
             r#"{"type": "Feature", "properties": {"fid": 42, "name": "New Zealand"}, "geometry": {"type": "MultiPolygon", "coordinates": [[[[173.020375,-40.919052],[173.247234,-41.331999],[173.958405,-40.926701],[174.247587,-41.349155],[174.248517,-41.770008],[173.876447,-42.233184],[173.22274,-42.970038],[172.711246,-43.372288],[173.080113,-43.853344],[172.308584,-43.865694],[171.452925,-44.242519],[171.185138,-44.897104],[170.616697,-45.908929],[169.831422,-46.355775],[169.332331,-46.641235],[168.411354,-46.619945],[167.763745,-46.290197],[166.676886,-46.219917],[166.509144,-45.852705],[167.046424,-45.110941],[168.303763,-44.123973],[168.949409,-43.935819],[169.667815,-43.555326],[170.52492,-43.031688],[171.12509,-42.512754],[171.569714,-41.767424],[171.948709,-41.514417],[172.097227,-40.956104],[172.79858,-40.493962],[173.020375,-40.919052]]],[[[174.612009,-36.156397],[175.336616,-37.209098],[175.357596,-36.526194],[175.808887,-36.798942],[175.95849,-37.555382],[176.763195,-37.881253],[177.438813,-37.961248],[178.010354,-37.579825],[178.517094,-37.695373],[178.274731,-38.582813],[177.97046,-39.166343],[177.206993,-39.145776],[176.939981,-39.449736],[177.032946,-39.879943],[176.885824,-40.065978],[176.508017,-40.604808],[176.01244,-41.289624],[175.239567,-41.688308],[175.067898,-41.425895],[174.650973,-41.281821],[175.22763,-40.459236],[174.900157,-39.908933],[173.824047,-39.508854],[173.852262,-39.146602],[174.574802,-38.797683],[174.743474,-38.027808],[174.697017,-37.381129],[174.292028,-36.711092],[174.319004,-36.534824],[173.840997,-36.121981],[173.054171,-35.237125],[172.636005,-34.529107],[173.007042,-34.450662],[173.551298,-35.006183],[174.32939,-35.265496],[174.612009,-36.156397]]]]}}"#,
         );
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, false, false);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, false, false, false);
         assert!(geojson.process(&mut fgb_writer).is_ok());
         let mut out: Vec<u8> = Vec::new();
         let feat = FgbFeature {
@@ -673,12 +694,12 @@ mod test {
         let multi = r#"{"type": "Feature", "properties": {"fid": 0, "name": "Albania"}, "geometry": {"type": "MultiPolygon", "coordinates": [[[[20.590247,41.855404],[20.463175,41.515089],[20.605182,41.086226],[21.02004,40.842727],[20.99999,40.580004],[20.674997,40.435],[20.615,40.110007],[20.150016,39.624998],[19.98,39.694993],[19.960002,39.915006],[19.406082,40.250773],[19.319059,40.72723],[19.40355,41.409566],[19.540027,41.719986],[19.371769,41.877548],[19.304486,42.195745],[19.738051,42.688247],[19.801613,42.500093],[20.0707,42.58863],[20.283755,42.32026],[20.52295,42.21787],[20.590247,41.855404]]]]}}"#;
         let mut geojson = GeoJson(single);
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, true, false);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, true, false, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(json, single);
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, true, true);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, true, true, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(json, multi);
@@ -687,7 +708,7 @@ mod test {
         let mut geojson = GeoJson(
             r#"{"type": "Feature", "properties": {"fid": 0, "name": "Collection"}, "geometry": {"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [100.1,0.1]},{"type": "LineString", "coordinates": [[101.1,0.1],[102.1,1.1]]}]}}"#,
         );
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, true, false);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, true, false, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(
@@ -703,34 +724,34 @@ mod test {
         let multi = r#"{"type": "Feature", "properties": {"fid": 0, "name": "Albania"}, "geometry": {"type": "MultiPolygon", "coordinates": [[[[20.590247,41.855404],[20.463175,41.515089],[20.605182,41.086226],[21.02004,40.842727],[20.99999,40.580004],[20.674997,40.435],[20.615,40.110007],[20.150016,39.624998],[19.98,39.694993],[19.960002,39.915006],[19.406082,40.250773],[19.319059,40.72723],[19.40355,41.409566],[19.540027,41.719986],[19.371769,41.877548],[19.304486,42.195745],[19.738051,42.688247],[19.801613,42.500093],[20.0707,42.58863],[20.283755,42.32026],[20.52295,42.21787],[20.590247,41.855404]]]]}}"#;
         let mut geojson = GeoJson(single);
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::MultiPolygon, false, true);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::MultiPolygon, false, true, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(json, multi);
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::MultiPolygon, false, false);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::MultiPolygon, false, false, false);
         let result = geojson.process(&mut fgb_writer);
         assert_eq!(
             result.err().unwrap().to_string(),
             "processing geometry `Cannot mix geometry types - expected type `MultiPolygon`, actual type `Polygon``"
         );
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Polygon, false, true);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Polygon, false, true, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(json, single);
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Polygon, false, false);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Polygon, false, false, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(json, single);
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, false, true);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, false, true, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(json, multi);
 
-        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, false, false);
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Unknown, false, false, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         assert_eq!(json, single);
@@ -738,7 +759,8 @@ mod test {
         // Don't promote within collection
         let single = r#"{"type": "Feature", "properties": {"fid": 0, "name": "Collection"}, "geometry": {"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [100.1,0.1]},{"type": "LineString", "coordinates": [[101.1,0.1],[102.1,1.1]]}]}}"#;
         let mut geojson = GeoJson(single);
-        let mut fgb_writer = FeatureWriter::new(GeometryType::GeometryCollection, false, true);
+        let mut fgb_writer =
+            FeatureWriter::new(GeometryType::GeometryCollection, false, true, false);
         geojson.process(&mut fgb_writer).unwrap();
         let json = write_as_geojson(fgb_writer)?;
         // assert_eq!(json, single); // geozero JSON writer skips GeometryCollection
@@ -747,6 +769,24 @@ mod test {
             r#"{"type": "Feature", "properties": {"fid": 0, "name": "Collection"}, "geometry": {"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [100.1,0.1]},{"type": "LineString", "coordinates": [[101.1,0.1],[102.1,1.1]]}]}}"#
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn sparse_properties() -> Result<()> {
+        let input = r#"{"type": "Feature", "properties": {"fid": 123, "name": ""}, "geometry": {"type": "Point", "coordinates": [1.1,2.2]}}"#;
+        let mut geojson = GeoJson(input);
+
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Point, false, true, false);
+        geojson.process(&mut fgb_writer).unwrap();
+        let output = write_as_geojson(fgb_writer)?;
+        assert_eq!(input, output);
+
+        let expected_sparse_output = r#"{"type": "Feature", "properties": {"fid": 123}, "geometry": {"type": "Point", "coordinates": [1.1,2.2]}}"#;
+        let mut fgb_writer = FeatureWriter::new(GeometryType::Point, false, true, true);
+        geojson.process(&mut fgb_writer).unwrap();
+        let output = write_as_geojson(fgb_writer)?;
+        assert_eq!(output, expected_sparse_output);
         Ok(())
     }
 

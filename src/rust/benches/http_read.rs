@@ -1,7 +1,10 @@
 use criterion::{criterion_group, criterion_main, Criterion};
+use std::io::{BufWriter, Read, Seek, SeekFrom};
 
-use flatgeobuf::HttpFgbReader;
+use flatgeobuf::{streaming_http_reader::HttpFgbReader as StreamingHttpReader, HttpFgbReader};
+use futures_util::StreamExt;
 use geozero::error::Result;
+use geozero::geojson::GeoJsonWriter;
 
 // 205KB
 const SMALL_URL: &str = "http://localhost:8001/countries.fgb";
@@ -9,7 +12,20 @@ const SMALL_URL: &str = "http://localhost:8001/countries.fgb";
 // 13MB
 const MEDIUM_URL: &str = "http://localhost:8001/UScounties.fgb";
 
-async fn select_all(url: &str, expected_feature_count: usize) -> Result<()> {
+async fn stream_select_all(url: &str, expected_feature_count: usize) -> Result<()> {
+    let mut reader = StreamingHttpReader::open(url).await.unwrap();
+    let mut stream = reader.select_all().await.unwrap();
+
+    let mut count = 0;
+    while let Some(feature) = stream.next().await {
+        let _feature = feature.unwrap();
+        count += 1
+    }
+    assert_eq!(count, expected_feature_count);
+    Ok(())
+}
+
+async fn chunk_select_all(url: &str, expected_feature_count: usize) -> Result<()> {
     let reader = HttpFgbReader::open(url).await.unwrap();
     let mut stream = reader.select_all().await.unwrap();
 
@@ -22,7 +38,19 @@ async fn select_all(url: &str, expected_feature_count: usize) -> Result<()> {
     Ok(())
 }
 
-async fn select_bbox(url: &str, expected_feature_count: usize) {
+async fn stream_select_bbox(url: &str, expected_feature_count: usize) {
+    let mut reader = StreamingHttpReader::open(url).await.unwrap();
+    let mut stream = reader.select_bbox(-86.0, 10.0, -85.0, 40.0).await.unwrap();
+
+    let mut count = 0;
+    while let Some(feature) = stream.next().await {
+        let _feature = feature.unwrap();
+        count += 1
+    }
+    assert_eq!(count, expected_feature_count);
+}
+
+async fn chunk_select_bbox(url: &str, expected_feature_count: usize) {
     let reader = HttpFgbReader::open(url).await.unwrap();
     let mut stream = reader.select_bbox(-86.0, 10.0, -85.0, 40.0).await.unwrap();
 
@@ -33,10 +61,69 @@ async fn select_bbox(url: &str, expected_feature_count: usize) {
     }
     assert_eq!(count, expected_feature_count);
 }
+async fn chunk_to_geojson() {
+    let url = MEDIUM_URL;
+
+    let reader = HttpFgbReader::open(url).await.unwrap();
+    let mut stream = reader.select_bbox(-86.0, 10.0, -85.0, 40.0).await.unwrap();
+
+    let mut output = tempfile::NamedTempFile::new().unwrap();
+    {
+        let mut json_writer = GeoJsonWriter::new(BufWriter::new(&mut output));
+        stream.process_features(&mut json_writer).await.unwrap();
+    }
+    output.seek(SeekFrom::Start(0)).unwrap();
+
+    let expected_byte_len = 871246;
+    assert_eq!(
+        output.as_file().metadata().unwrap().len(),
+        expected_byte_len
+    );
+    output.seek(SeekFrom::Start(88)).unwrap();
+
+    let mut actual_bytes = vec![0; 103];
+    output.read_exact(&mut actual_bytes).unwrap();
+
+    let actual = String::from_utf8(actual_bytes).unwrap();
+
+    let expected = r#""properties": {"STATE_FIPS": "18", "COUNTY_FIP": "161", "FIPS": "18161", "STATE": "IN", "NAME": "Union""#;
+    assert_eq!(actual, expected);
+}
+
+async fn stream_to_geojson() {
+    let url = MEDIUM_URL;
+
+    let mut reader = StreamingHttpReader::open(url).await.unwrap();
+    let mut stream = reader.select_bbox(-86.0, 10.0, -85.0, 40.0).await.unwrap();
+
+    let mut output = tempfile::NamedTempFile::new().unwrap();
+    {
+        let mut json_writer = GeoJsonWriter::new(BufWriter::new(&mut output));
+        stream.process_features(&mut json_writer).await.unwrap();
+    }
+    output.seek(SeekFrom::Start(0)).unwrap();
+
+    let expected_byte_len = 871246;
+    assert_eq!(
+        output.as_file().metadata().unwrap().len(),
+        expected_byte_len
+    );
+    output.seek(SeekFrom::Start(88)).unwrap();
+
+    let mut actual_bytes = vec![0; 103];
+    output.read_exact(&mut actual_bytes).unwrap();
+
+    let actual = String::from_utf8(actual_bytes).unwrap();
+
+    let expected = r#""properties": {"STATE_FIPS": "18", "COUNTY_FIP": "161", "FIPS": "18161", "STATE": "IN", "NAME": "Union""#;
+    assert_eq!(actual, expected);
+}
 
 fn criterion_benchmark(c: &mut Criterion) {
     use std::time::Duration;
     use yocalhost::ThrottledServer;
+
+    env_logger::builder().format_timestamp_millis().init();
 
     let port = 8001;
 
@@ -77,16 +164,40 @@ fn criterion_benchmark(c: &mut Criterion) {
         ("small", SMALL_URL, 179, 4),
         ("medium", MEDIUM_URL, 3221, 140),
     ] {
-        c.bench_function(&format!("{name} select_all"), |b| {
+        c.bench_function(&format!("{name} select_all (chunk)"), |b| {
             let runtime = tokio::runtime::Runtime::new().unwrap();
-            b.to_async(runtime).iter(|| select_all(url, total_count))
+            b.to_async(runtime)
+                .iter(|| chunk_select_all(url, total_count))
         });
 
-        c.bench_function(&format!("{name} select_bbox"), |b| {
+        c.bench_function(&format!("{name} select_all (stream)"), |b| {
             let runtime = tokio::runtime::Runtime::new().unwrap();
-            b.to_async(runtime).iter(|| select_bbox(url, bbox_count))
+            b.to_async(runtime)
+                .iter(|| stream_select_all(url, total_count))
+        });
+
+        c.bench_function(&format!("{name} select_bbox (chunk)"), |b| {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            b.to_async(runtime)
+                .iter(|| chunk_select_bbox(url, bbox_count))
+        });
+
+        c.bench_function(&format!("{name} select_bbox (stream)"), |b| {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            b.to_async(runtime)
+                .iter(|| stream_select_bbox(url, bbox_count))
         });
     }
+
+    c.bench_function("medium bbox -> geojson (chunk)", |b| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        b.to_async(runtime).iter(chunk_to_geojson)
+    });
+
+    c.bench_function("medium bbox -> geojson (stream)", |b| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        b.to_async(runtime).iter(stream_to_geojson)
+    });
 }
 
 criterion_group!(name=benches; config=Criterion::default().sample_size(10); targets=criterion_benchmark);

@@ -51,6 +51,22 @@ impl NodeItem {
         }
     }
 
+    pub fn bounds_and_offset(
+        min_x: f64,
+        min_y: f64,
+        max_x: f64,
+        max_y: f64,
+        offset: u64,
+    ) -> NodeItem {
+        NodeItem {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+            offset,
+        }
+    }
+
     pub fn from_reader(mut rdr: impl Read) -> Result<Self> {
         Ok(NodeItem {
             min_x: rdr.read_f64::<LittleEndian>()?,
@@ -61,7 +77,7 @@ impl NodeItem {
         })
     }
 
-    fn from_bytes(raw: &[u8]) -> Result<Self> {
+    pub(crate) fn from_bytes(raw: &[u8]) -> Result<Self> {
         Self::from_reader(&mut Cursor::new(raw))
     }
 
@@ -160,7 +176,7 @@ fn read_node_items<R: Read + Seek>(
 
 /// Read partial item vec from http
 #[cfg(feature = "http")]
-async fn read_http_node_items(
+pub async fn read_http_node_items(
     client: &mut BufferedHttpRangeClient,
     base: usize,
     node_index: usize,
@@ -301,7 +317,7 @@ impl PackedRTree {
         Ok(())
     }
 
-    fn generate_level_bounds(num_items: usize, node_size: u16) -> Vec<(usize, usize)> {
+    pub(crate) fn generate_level_bounds(num_items: usize, node_size: u16) -> Vec<(usize, usize)> {
         assert!(node_size >= 2, "Node size must be at least 2");
         assert!(num_items > 0, "Cannot create empty tree");
         assert!(

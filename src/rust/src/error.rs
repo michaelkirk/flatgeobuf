@@ -6,7 +6,9 @@ pub enum Error {
     MissingMagicBytes,
     NoIndex,
     #[cfg(feature = "http")]
-    HttpClient(http_range_client::HttpError),
+    ChunkedHttpClient(http_range_client::HttpError),
+    #[cfg(feature = "http")]
+    StreamingHttpClient(streaming_http_range_client::Error),
     IllegalHeaderSize(usize),
     InvalidFlatbuffer(InvalidFlatbuffer),
     IO(std::io::Error),
@@ -19,7 +21,9 @@ impl Display for Error {
             Error::MissingMagicBytes => "Missing magic bytes. Is this an fgb file?".fmt(f),
             Error::NoIndex => "Index missing".fmt(f),
             #[cfg(feature = "http")]
-            Error::HttpClient(http_client) => http_client.fmt(f),
+            // TODO: consolidate HTTP errors
+            Error::ChunkedHttpClient(http_client) => http_client.fmt(f),
+            Error::StreamingHttpClient(http_client) => http_client.fmt(f),
             Error::IllegalHeaderSize(size) => write!(f, "Illegal header size: {size}"),
             Error::InvalidFlatbuffer(invalid_flatbuffer) => invalid_flatbuffer.fmt(f),
             Error::IO(io) => io.fmt(f),
@@ -44,6 +48,13 @@ impl From<InvalidFlatbuffer> for Error {
 #[cfg(feature = "http")]
 impl From<http_range_client::HttpError> for Error {
     fn from(value: http_range_client::HttpError) -> Self {
-        Error::HttpClient(value)
+        Error::ChunkedHttpClient(value)
+    }
+}
+
+#[cfg(feature = "http")]
+impl From<streaming_http_range_client::Error> for Error {
+    fn from(value: streaming_http_range_client::Error) -> Self {
+        Error::StreamingHttpClient(value)
     }
 }

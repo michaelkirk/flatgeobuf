@@ -1,7 +1,8 @@
 #[cfg(feature = "http")]
 mod http {
-
     use flatgeobuf::*;
+    use geozero::geojson::GeoJsonWriter;
+    use std::io::{BufWriter, Read, Seek, SeekFrom};
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -16,6 +17,20 @@ mod http {
         let props = feature.properties()?;
         assert_eq!(props["name"], "Antarctica".to_string());
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn medium_select_bbox() {
+        let url = "http://localhost:8001/UScounties.fgb";
+        let reader = HttpFgbReader::open(url).await.unwrap();
+        let mut stream = reader.select_bbox(-86.0, 10.0, -85.0, 40.0).await.unwrap();
+
+        let mut count = 0;
+        while let Some(feature) = stream.next().await.transpose() {
+            let _feature = feature.unwrap();
+            count += 1
+        }
+        assert_eq!(count, 140);
     }
 
     #[tokio::test]
@@ -82,5 +97,34 @@ mod http {
             error_text.contains(expected_error_text),
             "expected to find {expected_error_text} in {error_text}"
         );
+    }
+
+    #[tokio::test]
+    async fn to_geojson() {
+        let url = "https://github.com/flatgeobuf/flatgeobuf/raw/master/test/data/UScounties.fgb";
+        let reader = HttpFgbReader::open(url).await.unwrap();
+        let mut stream = reader.select_bbox(-86.0, 10.0, -85.0, 40.0).await.unwrap();
+
+        let mut output = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut json_writer = GeoJsonWriter::new(BufWriter::new(&mut output));
+            stream.process_features(&mut json_writer).await.unwrap();
+        }
+        output.seek(SeekFrom::Start(0)).unwrap();
+
+        let expected_byte_len = 871246;
+        assert_eq!(
+            output.as_file().metadata().unwrap().len(),
+            expected_byte_len
+        );
+        output.seek(SeekFrom::Start(88)).unwrap();
+
+        let mut actual_bytes = vec![0; 103];
+        output.read_exact(&mut actual_bytes).unwrap();
+
+        let actual = String::from_utf8(actual_bytes).unwrap();
+
+        let expected = r#""properties": {"STATE_FIPS": "18", "COUNTY_FIP": "161", "FIPS": "18161", "STATE": "IN", "NAME": "Union""#;
+        assert_eq!(actual, expected);
     }
 }

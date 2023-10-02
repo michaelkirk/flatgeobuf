@@ -85,6 +85,8 @@ mod header_generated;
 mod http_reader;
 pub mod packed_r_tree;
 mod properties_reader;
+#[cfg(feature = "http")]
+pub mod streaming_http_reader;
 
 pub use error::{Error, Result};
 pub use feature_generated::*;

@@ -58,7 +58,7 @@ impl HttpFgbReader {
         // In reality, the header is probably less than half this size, but better to overshoot and
         // fetch an extra kb rather than have to issue a second request.
         let assumed_header_size = 2024;
-        let req_size = assumed_header_size + prefetch_index_bytes;
+        let req_size = assumed_header_size + prefetch_index_bytes as u64;
         debug!("fetching header. req_size: {req_size} (assumed_header_size: {assumed_header_size}, prefetched_index_bytes: {prefetch_index_bytes})");
 
         client.set_range(0..req_size).await?;
@@ -82,7 +82,7 @@ impl HttpFgbReader {
         header_buffer.resize(header_len + 4, 0);
 
         let header_start = 12;
-        let header_end = header_start + header_len;
+        let header_end = header_start + header_len as u64;
         client
             .append_contiguous_range(header_start..header_end)
             .await?;
@@ -131,7 +131,7 @@ impl HttpFgbReader {
         };
 
         // fast forward over any index to the feature data.
-        let feature_base = self.header_len() + index_size;
+        let feature_base = self.header_len() as u64 + index_size as u64;
         client
             .seek_to_range(HttpRange::RangeFrom(feature_base..))
             .await?;
@@ -161,7 +161,7 @@ impl HttpFgbReader {
 
         let list = SelectBbox::http_stream_search(
             &mut client,
-            header_len,
+            header_len as u64,
             count,
             PackedRTree::DEFAULT_NODE_SIZE,
             min_x,
@@ -172,14 +172,12 @@ impl HttpFgbReader {
         )
         .await?;
         debug_assert!(
-            list.windows(2)
-                .all(|w| w[0].start() < w[1].start()),
+            list.windows(2).all(|w| w[0].start() < w[1].start()),
             "Since the tree is traversed breadth first, list should be sorted by construction."
         );
 
         let feature_batches: Vec<FeatureBatch> =
-            FeatureBatch::make_batches(list, client, self.combine_request_threshold)
-                .await?;
+            FeatureBatch::make_batches(list, client, self.combine_request_threshold).await?;
 
         trace!("completed: select_bbox");
         let select_bbox = SelectBbox { feature_batches };
@@ -254,7 +252,7 @@ impl FeatureBatch {
             };
 
             let wasted_bytes = range.start() - prev_end;
-            if wasted_bytes < combine_request_threshold {
+            if wasted_bytes < combine_request_threshold as u64 {
                 if wasted_bytes == 0 {
                     trace!("adjacent feature");
                 } else {
@@ -319,7 +317,7 @@ impl SelectBbox {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn http_stream_search(
         client: &mut HttpClient,
-        index_begin: usize,
+        index_begin: u64,
         num_items: usize,
         node_size: u16,
         min_x: f64,
@@ -339,7 +337,7 @@ impl SelectBbox {
             .0;
         debug!("http_stream_search - index_begin: {index_begin}, num_items: {num_items}, node_size: {node_size}, level_bounds: {level_bounds:?}, GPS bounds:[({min_x}, {min_y}), ({max_x},{max_y})]");
 
-        let feature_begin = index_begin + PackedRTree::index_size(num_items, node_size);
+        let feature_begin = index_begin + PackedRTree::index_size(num_items, node_size) as u64;
 
         #[derive(Debug, PartialEq, Eq)]
         struct NodeRange {
@@ -385,9 +383,9 @@ impl SelectBbox {
                     continue;
                 }
                 if is_leaf_node {
-                    let start = feature_begin + node_item.offset as usize;
+                    let start = feature_begin + node_item.offset;
                     if let Some(next_node_item) = &node_items.get(node_pos + 1) {
-                        let end = feature_begin + next_node_item.offset as usize;
+                        let end = feature_begin + next_node_item.offset;
                         results.push(HttpRange::Range(start..end));
                     } else {
                         debug_assert_eq!(node_pos, num_items);
@@ -737,11 +735,11 @@ mod node_items {
 
     pub async fn read_http_node_items(
         client: &mut HttpClient,
-        base: usize,
+        base: u64,
         nodes: Range<usize>,
     ) -> Result<Vec<NodeItem>> {
-        let begin = base + nodes.start * size_of::<NodeItem>();
-        let end = base + nodes.end * size_of::<NodeItem>();
+        let begin = base + (nodes.start * size_of::<NodeItem>()) as u64;
+        let end = base + (nodes.end * size_of::<NodeItem>()) as u64;
         let range = HttpRange::Range(begin..end);
         client.seek_to_range(range).await?;
 

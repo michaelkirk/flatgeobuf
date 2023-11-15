@@ -132,9 +132,7 @@ impl HttpFgbReader {
 
         // fast forward over any index to the feature data.
         let feature_base = self.header_len() as u64 + index_size as u64;
-        client
-            .seek_to_range(HttpRange::RangeFrom(feature_base..))
-            .await?;
+        client.seek_to_range(feature_base..).await?;
 
         let select_all = SelectAll {
             features_left: features_count,
@@ -730,7 +728,7 @@ mod node_items {
     use crate::packed_r_tree::NodeItem;
     use std::mem::size_of;
     use std::ops::Range;
-    use streaming_http_range_client::{HttpClient, HttpRange};
+    use streaming_http_range_client::HttpClient;
     use tokio::io::AsyncReadExt;
 
     pub async fn read_http_node_items(
@@ -740,8 +738,7 @@ mod node_items {
     ) -> Result<Vec<NodeItem>> {
         let begin = base + (nodes.start * size_of::<NodeItem>()) as u64;
         let end = base + (nodes.end * size_of::<NodeItem>()) as u64;
-        let range = HttpRange::Range(begin..end);
-        client.seek_to_range(range).await?;
+        client.seek_to_range(begin..end).await?;
 
         let mut node_items = Vec::with_capacity(nodes.len());
         for _i in 0..nodes.len() {

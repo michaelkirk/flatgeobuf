@@ -31,8 +31,6 @@ pub struct FeatureIter<R, S> {
     count: Option<usize>,
     /// Current feature number
     feat_no: usize,
-    /// File offset within feature section
-    cur_pos: u64,
     /// Reading state
     state: State,
     /// Whether or not the underlying reader is Seek
@@ -42,8 +40,14 @@ pub struct FeatureIter<R, S> {
 #[derive(Debug, PartialEq, Eq)]
 enum State {
     Init,
-    ReadFirstFeatureSize,
-    Reading,
+    ReadFirstFeatureSize {
+        /// File offset within feature section
+        cur_pos: u64,
+    },
+    Reading {
+        /// File offset within feature section
+        cur_pos: u64,
+    },
     Finished,
 }
 
@@ -52,6 +56,7 @@ pub mod reader_trait {
     pub struct Seekable;
     pub struct NotSeekable;
 }
+use crate::file_reader::State::ReadFirstFeatureSize;
 use reader_trait::*;
 
 impl<R: Read> FgbReader<R> {
@@ -244,14 +249,18 @@ impl<R: Read> FallibleStreamingIterator for FeatureIter<R, NotSeekable> {
         }
         if let Some(filter) = &self.item_filter {
             let item = &filter[self.feat_no];
-            if item.offset as u64 > self.cur_pos {
-                if self.state == State::ReadFirstFeatureSize {
-                    self.state = State::Reading;
+            match self.state {
+                State::Reading { cur_pos } | State::ReadFirstFeatureSize { cur_pos } => {
+                    if item.offset as u64 > cur_pos {
+                        // skip features
+                        let seek_bytes = item.offset as u64 - cur_pos;
+                        io::copy(&mut (&mut self.reader).take(seek_bytes), &mut io::sink())?;
+                        self.state = State::Reading {
+                            cur_pos: item.offset as u64,
+                        };
+                    }
                 }
-                // skip features
-                let seek_bytes = item.offset as u64 - self.cur_pos;
-                io::copy(&mut (&mut self.reader).take(seek_bytes), &mut io::sink())?;
-                self.cur_pos += seek_bytes;
+                State::Init | State::Finished => unreachable!(),
             }
         }
         self.read_feature()
@@ -299,14 +308,18 @@ impl<R: Read + Seek> FallibleStreamingIterator for FeatureIter<R, Seekable> {
         }
         if let Some(filter) = &self.item_filter {
             let item = &filter[self.feat_no];
-            if item.offset as u64 > self.cur_pos {
-                if self.state == State::ReadFirstFeatureSize {
-                    self.state = State::Reading;
+            match self.state {
+                State::Reading { cur_pos } | State::ReadFirstFeatureSize { cur_pos } => {
+                    if item.offset as u64 > cur_pos {
+                        // skip features
+                        let seek_bytes = item.offset as u64 - cur_pos;
+                        self.reader.seek(SeekFrom::Current(seek_bytes as i64))?;
+                        self.state = State::Reading {
+                            cur_pos: item.offset as u64,
+                        };
+                    }
                 }
-                // skip features
-                let seek_bytes = item.offset as u64 - self.cur_pos;
-                self.reader.seek(SeekFrom::Current(seek_bytes as i64))?;
-                self.cur_pos += seek_bytes;
+                State::Init | State::Finished => unreachable!(),
             }
         }
         self.read_feature()
@@ -447,17 +460,11 @@ impl<R: Read, S> FeatureIter<R, S> {
             item_filter,
             count: None,
             feat_no: 0,
-            cur_pos: 0,
             state: State::Init,
             seekable_marker: PhantomData,
         };
 
-        if iter.read_feature_size() {
-            iter.state = State::Finished
-        } else {
-            iter.state = State::ReadFirstFeatureSize
-        };
-
+        iter.read_feature_size();
         iter.count = match &iter.item_filter {
             Some(list) => Some(list.len()),
             None => {
@@ -499,22 +506,33 @@ impl<R: Read, S> FeatureIter<R, S> {
     }
 
     /// Read feature size and return true if end of dataset reached
-    fn read_feature_size(&mut self) -> bool {
+    fn read_feature_size(&mut self) {
         self.fbs.feature_buf.resize(4, 0);
-        self.cur_pos += 4;
-        self.reader.read_exact(&mut self.fbs.feature_buf).is_err()
+        let Ok(()) = self.reader.read_exact(&mut self.fbs.feature_buf) else {
+            self.state = State::Finished;
+            return;
+        };
+        match self.state {
+            State::Init => self.state = ReadFirstFeatureSize { cur_pos: 4 },
+            State::ReadFirstFeatureSize { .. } | State::Finished => unreachable!(),
+            State::Reading { cur_pos } => {
+                self.state = State::Reading {
+                    cur_pos: cur_pos + 4,
+                }
+            }
+            State::Finished => {}
+        }
     }
 
     fn read_feature(&mut self) -> Result<()> {
-        match self.state {
-            State::ReadFirstFeatureSize => {
-                self.state = State::Reading;
-            }
-            State::Reading => {
-                if self.read_feature_size() {
-                    self.state = State::Finished;
+        let cur_pos = match self.state {
+            State::ReadFirstFeatureSize { cur_pos } => cur_pos,
+            State::Reading { .. } => {
+                self.read_feature_size();
+                let State::Reading { cur_pos } = self.state else {
                     return Ok(());
-                }
+                };
+                cur_pos
             }
             State::Finished => {
                 debug_assert!(
@@ -526,7 +544,7 @@ impl<R: Read, S> FeatureIter<R, S> {
             State::Init => {
                 unreachable!("should have read first feature size before reading any features")
             }
-        }
+        };
         let sbuf = &self.fbs.feature_buf;
         let feature_size = u32::from_le_bytes([sbuf[0], sbuf[1], sbuf[2], sbuf[3]]) as usize;
         self.fbs.feature_buf.resize(feature_size + 4, 0);
@@ -535,7 +553,9 @@ impl<R: Read, S> FeatureIter<R, S> {
             let _feature = size_prefixed_root_as_feature(&self.fbs.feature_buf)?;
         }
         self.feat_no += 1;
-        self.cur_pos += feature_size as u64;
+        self.state = State::Reading {
+            cur_pos: cur_pos + feature_size as u64,
+        };
         Ok(())
     }
 
@@ -543,7 +563,7 @@ impl<R: Read, S> FeatureIter<R, S> {
         if self.state == State::Finished {
             None
         } else {
-            debug_assert!(self.state == State::Reading);
+            debug_assert!(matches!(self.state, State::Reading { .. }));
             Some(&self.fbs)
         }
     }
